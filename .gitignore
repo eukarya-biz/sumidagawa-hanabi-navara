@@ -1,0 +1,9 @@
+node_modules
+dist
+.DS_Store
+*.log
+
+# 認証情報は絶対にコミットしない
+.env
+.env.*
+!.env.example

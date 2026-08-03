@@ -1,0 +1,153 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "言問橋 西 → 東（スカイツリー・押上方面）",
+        "color": "#5fe6ff"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            139.8012,
+            35.7146
+          ],
+          [
+            139.8036,
+            35.7139
+          ],
+          [
+            139.806,
+            35.713
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "吾妻橋 東 → 西（浅草駅方面）",
+        "color": "#ffb457"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            139.799,
+            35.7098
+          ],
+          [
+            139.7967,
+            35.7106
+          ],
+          [
+            139.795,
+            35.7109
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "雷門通り 東 → 西（田原町・稲荷町方面）",
+        "color": "#ffb457"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            139.7969,
+            35.71
+          ],
+          [
+            139.794,
+            35.7106
+          ],
+          [
+            139.7907,
+            35.7112
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "江戸通り 北 → 南（蔵前・浅草橋方面）",
+        "color": "#ffb457"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            139.7969,
+            35.71
+          ],
+          [
+            139.7952,
+            35.7078
+          ],
+          [
+            139.7937,
+            35.7046
+          ],
+          [
+            139.7913,
+            35.7007
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "清澄通り 北 → 南（両国方面）",
+        "color": "#5fe6ff"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            139.7962,
+            35.7052
+          ],
+          [
+            139.795,
+            35.701
+          ],
+          [
+            139.7935,
+            35.696
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "墨堤通り 北 → 南（本所吾妻橋方面）",
+        "color": "#5fe6ff"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            139.8073,
+            35.7176
+          ],
+          [
+            139.8035,
+            35.714
+          ],
+          [
+            139.799,
+            35.7106
+          ]
+        ]
+      }
+    }
+  ]
+}
