@@ -523,14 +523,17 @@ const SHOW_START_HOUR = 19.0;
 const SHOW_END_HOUR = 20.5;
 /**
  * 打ち上げ前の時間帯の早送り倍率。
- * 17:30 から 19:00 まで等速で進むと 4 分以上待つことになるので、
+ * 18:30 から 19:00 まで等速で進むと 1 分半待つことになるので、
  * 空だけを早送りして開始時刻に入る。
  */
 const PRE_SHOW_FAST_FORWARD = 8;
 /** 番組 1 秒あたりに進む時刻（時間）。256 秒で 90 分。 */
 const HOUR_PER_SECOND = (SHOW_END_HOUR - SHOW_START_HOUR) / PROGRAM_LENGTH;
-/** スライダーの下限。ここまで戻って繰り返す。 */
-const CLOCK_START_HOUR = 17.5;
+/**
+ * スライダーの下限。ここまで戻って繰り返す。
+ * 18:30 は日没（18:52）の直前で、ここから空が色づき始める。
+ */
+const CLOCK_START_HOUR = 18.5;
 /** スライダーの上限。打ち上げ終了時刻に合わせている。 */
 const CLOCK_END_HOUR = SHOW_END_HOUR;
 

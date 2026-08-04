@@ -273,8 +273,8 @@ export function buildUi(opts: UiOptions) {
 
   const hourSlider = slider({
     label: "時刻（JST）",
-    // 17:30 の薄暮から、打ち上げ終了の 20:30 まで。
-    min: 17.5,
+    // 日没（18:52）直前の 18:30 から、打ち上げ終了の 20:30 まで。
+    min: 18.5,
     max: 20.5,
     // 30 秒刻み。場面の頭出しができる細かさ。
     step: 0.5 / 60,
