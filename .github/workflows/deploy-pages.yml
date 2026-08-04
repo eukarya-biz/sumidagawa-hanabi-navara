@@ -1,11 +1,14 @@
 # GitHub Pages への公開ワークフロー
 #
 # 注意（社内ルール）:
-# - eukarya-biz では Pages の公開設定はリポジトリ作成者でも行えないため、
-#   最初の 1 回だけ情シスに「Settings > Pages > Source = GitHub Actions」への
-#   変更を依頼する必要がある。
 # - Pages を使うにはリポジトリが Public である必要がある。
-#   API キーなどの認証情報を含めないよう注意すること（本作品は認証情報不要）。
+# - API キーなどの認証情報を含めないよう注意すること（本作品は認証情報不要）。
+#
+# `configure-pages` の `enablement: true` は、Pages がまだ有効化されていない
+# リポジトリに対して、ワークフロー自身が API 経由で有効化を試みる設定。
+# これが通れば情シスへの依頼は不要になる。
+# 組織側で Pages が制限されている場合は権限エラーになるので、
+# そのときは Settings > Pages > Source = GitHub Actions を情シスに依頼する。
 name: Deploy to GitHub Pages
 
 on:
@@ -27,6 +30,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Pages の有効化を先に済ませる。ここで失敗するならビルドしても無駄なので、
+      # 時間のかかる install / build より前に置いている。
+      - uses: actions/configure-pages@v5
+        with:
+          # Pages が未有効なら、このワークフロー自身が有効化を試みる
+          enablement: true
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -36,7 +45,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
