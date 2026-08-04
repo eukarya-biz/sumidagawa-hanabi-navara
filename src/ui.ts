@@ -273,9 +273,9 @@ export function buildUi(opts: UiOptions) {
 
   const hourSlider = slider({
     label: "時刻（JST）",
-    // 打ち上げは 19:00〜20:30。開始は薄暮の 17:30 から。
+    // 17:30 の薄暮から、打ち上げ終了の 20:30 まで。
     min: 17.5,
-    max: 21.5,
+    max: 20.5,
     // 30 秒刻み。場面の頭出しができる細かさ。
     step: 0.5 / 60,
     value: opts.initial.hour,
@@ -464,7 +464,7 @@ export function buildUi(opts: UiOptions) {
   const trafficWarn = document.createElement("p");
   trafficWarn.className = "hint warn";
   trafficWarn.innerHTML =
-    "⚠️ ここに表示している規制区間と動線は<b>概略値</b>です。公式の道路規制図が画像 PDF で機械的に読み取れなかったため、橋の実測座標を基準に街路の配置から起こしています。実際の通行判断には使えません。";
+    "⚠️ ここに表示している規制区間と動線は<b>イメージ</b>です。実際の通行判断には使えません。";
   trafficSection.append(trafficWarn);
 
   const waterSection = document.createElement("section");

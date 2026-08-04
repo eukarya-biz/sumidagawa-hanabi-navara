@@ -529,6 +529,10 @@ const SHOW_END_HOUR = 20.5;
 const PRE_SHOW_FAST_FORWARD = 8;
 /** 番組 1 秒あたりに進む時刻（時間）。256 秒で 90 分。 */
 const HOUR_PER_SECOND = (SHOW_END_HOUR - SHOW_START_HOUR) / PROGRAM_LENGTH;
+/** スライダーの下限。ここまで戻って繰り返す。 */
+const CLOCK_START_HOUR = 17.5;
+/** スライダーの上限。打ち上げ終了時刻に合わせている。 */
+const CLOCK_END_HOUR = SHOW_END_HOUR;
 
 /** 時刻から番組内の位置（秒）を求める。 */
 function programTimeFromHour(hour: number): number {
@@ -623,10 +627,16 @@ function applyRain(v: number) {
  * スライダーはその補正倍率として扱う。
  */
 function baseExposure(daylight: number): number {
-  // 昼 0.9 → 夜 3.5。
-  // 当初は夜を 9.9 にしていたが、発光物とブルームが重なって
-  // 街全体が白飛びした。ブルームの閾値を上げたぶん、露出も落としてある。
-  return 0.9 + (1 - daylight) * 2.6;
+  // 夜 3.5 → 昼 9.5。
+  //
+  // 直感に反するが、**昼のほうが高い露出が要る**。
+  // Navara の大気散乱が返す放射輝度の単位では昼の空でも値が小さく、
+  // 公式テンプレートも昼（8 時）のシーンで 10 を使っている。
+  // 当初これを逆に（昼 0.9 / 夜 3.5）していたため、17:30 でも空が暗いままだった。
+  //
+  // 指数を掛けているのは、薄暮のあいだは夜側の値に近く保つため。
+  // ここが急に上がると日没前後で絵が破綻する。
+  return 3.5 + Math.pow(daylight, 1.5) * 6.0;
 }
 
 function applyExposure(_v?: number) {
@@ -1045,7 +1055,12 @@ const ui = buildUi({
     applyNight();
     fireworks.reset();
     smoke.reset();
-    program.seek(Math.max(0, programTimeFromHour(v)));
+    // 打ち上げ時間帯の外にいるときは番組を頭に戻しておく
+    program.seek(
+      v >= SHOW_START_HOUR && v < SHOW_END_HOUR
+        ? Math.max(0, programTimeFromHour(v))
+        : 0,
+    );
   },
   onPlaying: (on) => {
     state.playing = on;
@@ -1161,18 +1176,33 @@ view.on("preRender", (t: number) => {
   applyKeyboardMove(Math.min(0.05, Math.max(0, dtRaw)));
 
   if (dt > 0) {
-    if (state.hour < SHOW_START_HOUR) {
-      // 打ち上げ前：空だけ早送りして 19:00 に入る
-      state.hour = Math.min(
-        SHOW_START_HOUR,
-        state.hour + dt * HOUR_PER_SECOND * PRE_SHOW_FAST_FORWARD,
-      );
-      if (state.hour >= SHOW_START_HOUR) program.seek(0);
-    } else {
-      for (const shell of program.advance(dt)) fireworks.launch(shell);
-      // 番組の進行がそのまま時刻になる。20:30 まで行ったら 19:00 に戻る。
-      state.hour = SHOW_START_HOUR + program.progress * (SHOW_END_HOUR - SHOW_START_HOUR);
+    // 打ち上げ中だけ等速。その前後は空だけ早送りする。
+    const inShow = state.hour >= SHOW_START_HOUR && state.hour < SHOW_END_HOUR;
+    const prevHour = state.hour;
+    state.hour +=
+      dt * HOUR_PER_SECOND * (inShow ? 1 : PRE_SHOW_FAST_FORWARD);
+
+    // 19:00 をまたいだ瞬間に番組を頭出しする
+    if (prevHour < SHOW_START_HOUR && state.hour >= SHOW_START_HOUR) {
+      state.hour = SHOW_START_HOUR;
+      program.seek(0);
     }
+
+    // 時刻は一方向にだけ進み、上限に達したら下限へ戻る。
+    // 以前は番組の進行から時刻を逆算していたため、20:30 を超えると
+    // 番組がループして時刻が 19:00 台へ引き戻され、
+    // スライダーを 20:30 より先へ動かせなくなっていた。
+    if (state.hour >= CLOCK_END_HOUR) {
+      state.hour = CLOCK_START_HOUR;
+      program.seek(0);
+      fireworks.reset();
+      smoke.reset();
+    }
+
+    if (inShow) {
+      for (const shell of program.advance(dt)) fireworks.launch(shell);
+    }
+
     const before = appliedHour;
     applyHour(state.hour);
     if (appliedHour !== before) {

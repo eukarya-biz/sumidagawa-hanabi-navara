@@ -78,7 +78,7 @@ export class SmokeSystem {
     max?: number;
   }) {
     this.rng = opts.rng;
-    this.max = opts.max ?? 2600;
+    this.max = opts.max ?? 3600;
     this.handle = opts.view.addMesh<InstancedSphereMeshDesc>({
       spheres: {
         // 煙の玉は大きいので、少し滑らかにする
@@ -90,7 +90,7 @@ export class SmokeSystem {
         emissiveIntensity: 0.18,
         effectIds: [opts.bloomId],
         transparent: true,
-        opacity: 0.13,
+        opacity: 0.18,
         children: [],
       },
       matrixWorld: opts.frame,
@@ -118,7 +118,9 @@ export class SmokeSystem {
    */
   spawnBurst(at: Vector3, burstRadius: number, quality: number, tint?: Color) {
     if (this.amount <= 0.01) return;
-    const n = Math.round(14 * this.amount * quality * (burstRadius / 90));
+    // 粒 1 つあたりを小さくしたぶん、数の基準を引き上げてある。
+    // ここが 14 のままだと、煙の量 10% で 1 発 1 粒しか出ず見えなくなる。
+    const n = Math.max(2, Math.round(48 * this.amount * quality * (burstRadius / 90)));
     for (let i = 0; i < n; i++) {
       if (this.particles.length >= this.max) break;
       const dir = new Vector3(
@@ -145,7 +147,7 @@ export class SmokeSystem {
   /** 打ち上げ時に筒口から出る煙。低い位置に溜まる。 */
   spawnLaunch(at: Vector3, quality: number) {
     if (this.amount <= 0.01) return;
-    const n = Math.max(1, Math.round(2 * this.amount * quality));
+    const n = Math.max(1, Math.round(6 * this.amount * quality));
     for (let i = 0; i < n; i++) {
       if (this.particles.length >= this.max) break;
       this.particles.push({
