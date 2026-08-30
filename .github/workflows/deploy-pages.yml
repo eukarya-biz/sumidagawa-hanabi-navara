@@ -4,11 +4,16 @@
 # - Pages を使うにはリポジトリが Public である必要がある。
 # - API キーなどの認証情報を含めないよう注意すること（本作品は認証情報不要）。
 #
+# eukarya-biz では「GitHub 製、または eukarya-biz 所有の Action」しか使えない。
+# そのため pnpm/action-setup（pnpm 社製）は使えず、
+#   The action pnpm/action-setup@v4 is not allowed in ... because all actions
+#   must be from a repository owned by eukarya-biz or created by GitHub.
+# というエラーで止まる。
+# 代わりに Node.js 同梱の corepack で pnpm を用意している。
+# ここで使っているのは actions/* だけなので、ポリシーに抵触しない。
+#
 # `configure-pages` の `enablement: true` は、Pages がまだ有効化されていない
 # リポジトリに対して、ワークフロー自身が API 経由で有効化を試みる設定。
-# これが通れば情シスへの依頼は不要になる。
-# 組織側で Pages が制限されている場合は権限エラーになるので、
-# そのときは Settings > Pages > Source = GitHub Actions を情シスに依頼する。
 name: Deploy to GitHub Pages
 
 on:
@@ -30,21 +35,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       # Pages の有効化を先に済ませる。ここで失敗するならビルドしても無駄なので、
       # 時間のかかる install / build より前に置いている。
       - uses: actions/configure-pages@v5
         with:
-          # Pages が未有効なら、このワークフロー自身が有効化を試みる
           enablement: true
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
+
+      # pnpm は Node 同梱の corepack で用意する（サードパーティ Action を使わない）。
+      # pnpm-lock.yaml は lockfileVersion 9.0 = pnpm 9 以降の形式。
+      - name: Set up pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.34.5 --activate
+          pnpm --version
+
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
