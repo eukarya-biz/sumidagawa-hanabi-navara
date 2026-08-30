@@ -415,6 +415,18 @@ public/data/
 └── pedestrian-flow.geojson      歩行者の進行方向（要差し替え）
 ```
 
+## ビルド時の注意
+
+`@navaramap/three` は大気散乱の事前計算テクスチャなどを
+`new URL("./assets/atmosphere", import.meta.url)` の形で参照しています。
+この書き方は Vite のビルド時に解決されないため、そのままだと
+**成果物にアセットが入らず、デプロイ後に空が真っ暗になります**
+（`vite dev` では `node_modules` 内で解決できるので気づけません）。
+
+`vite.config.ts` に、ビルド後にアセットを実行時が期待する場所
+（`dist/assets/assets/`）へコピーするプラグインを入れてあります。
+対象は `atmosphere` / `cloud` / `noise` / `water` の 4 ディレクトリ、計 38 MB です。
+
 ## 既知の課題
 
 - PLATEAU の 3D Tiles と地形の高さが数十メートルずれる場合があります

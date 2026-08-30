@@ -169,6 +169,44 @@ PolygonMaterial と ModelMaterial にはありますが、**TerrainMaterial に�
 
 ## 4. 遭遇した不具合・環境の問題
 
+### 4-0. ビルドすると大気テクスチャが成果物に入らず、本番で空が真っ暗になる（重要）
+
+**症状**：`vite dev` では夕暮れも夜空も正しく描画されるのに、
+`vite build` した成果物をデプロイすると**空が真っ暗**になる。
+
+**原因**：`@navaramap/three` が実行時アセットを
+
+```js
+new URL("./assets/atmosphere", import.meta.url)
+```
+
+の形で参照しているため。この書き方は Vite のビルド時に解決されず、
+ビルド中に警告が出ます。
+
+```
+new URL("./assets/atmosphere", import.meta.url) doesn't exist at build time,
+it will remain unchanged to be resolved at runtime.
+```
+
+- `vite dev` では `import.meta.url` が `node_modules` 内を指すのでファイルが見つかる
+- ビルド後は `import.meta.url` がバンドル済み JS（`dist/assets/index-xxx.js`）を
+  指すため `dist/assets/assets/atmosphere/...` を探しに行くが、
+  **Vite はこれらをコピーしないので 404 になる**
+
+対象は `atmosphere` / `cloud` / `noise` / `water` の 4 ディレクトリ、計 38 MB です。
+
+**回避策**：ビルド後にパッケージのアセットを実行時が期待する場所へコピーする
+Vite プラグインを自前で書きました（`vite.config.ts` の `copyNavaraAssets`）。
+
+**要望**：これは Navara を使う人が**全員必ず踏む**問題だと思います。
+開発中は正常なので、デプロイして初めて気づくのが厄介です。
+次のいずれかがあると良いと思います。
+
+- テンプレート（`navara-template`）にアセットのコピー処理を最初から入れておく
+- アセットの参照を Vite が解決できる形（`import` 文や `?url`）にする
+- `atmosphereAssetsUrl` / `stbnUrl` のような URL 指定オプションを
+  すべてのアセット（雨・水面を含む）に用意し、ドキュメントで案内する
+
 ### 4-1. `npm install` が peer 依存の衝突で失敗する
 
 ```
