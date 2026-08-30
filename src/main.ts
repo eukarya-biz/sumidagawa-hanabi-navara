@@ -655,11 +655,24 @@ const localUp = geodeticSurfaceNormal({
 });
 
 /**
+ * 暗くなり始める太陽高度（度）。ここで完全な夜として扱う。
+ *
+ * 当初は市民薄明の終わり（-6 度）を夜としていたが、それだと
+ * **実際より 40 分ほど早く暗くなる**。-6 度は 19:21 頃で、
+ * 街灯は点くもののまだ十分明るい時間帯。
+ * 体感として「暗い」のは航海薄明が終わる -12 度（19:56 頃）なので、
+ * そこまで引き延ばしている。
+ */
+const NIGHT_ELEVATION = -12;
+/** 完全な昼として扱う太陽高度（度）。 */
+const DAY_ELEVATION = 3;
+
+/**
  * 現在の「昼らしさ」0〜1 を太陽高度から求める。
  *
  * 時刻から決め打ちするのではなく、Navara が計算した太陽の向きを使う。
- * 市民薄明（太陽高度 -6 度）から高度 +2 度のあいだで
- * 環境光と地表の明るさを切り替える。日没直後にいきなり真っ暗にならない。
+ * 空そのものは Navara の大気散乱が物理的に描くので、
+ * ここで決めるのは地表・建物・環境光・露出の明るさ。
  */
 function currentDaylight(): number {
   const sun = view.atmosphere.sunDirection;
@@ -667,7 +680,8 @@ function currentDaylight(): number {
     (sun.x * localUp.x + sun.y * localUp.y + sun.z * localUp.z) /
     (Math.hypot(sun.x, sun.y, sun.z) || 1);
   const elevationDeg = (Math.asin(Math.max(-1, Math.min(1, dot))) * 180) / Math.PI;
-  const t = (elevationDeg - -6) / (2 - -6);
+  const t =
+    (elevationDeg - NIGHT_ELEVATION) / (DAY_ELEVATION - NIGHT_ELEVATION);
   const c = Math.max(0, Math.min(1, t));
   // なめらかに（smoothstep）
   return c * c * (3 - 2 * c);
