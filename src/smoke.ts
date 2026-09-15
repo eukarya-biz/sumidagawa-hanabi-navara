@@ -1,4 +1,5 @@
 import ThreeView, { Color, type MeshHandle } from "@navaramap/three";
+import type { DefaultDescriptions } from "@navaramap/three-default-plugin";
 import {
   InstancedSphereMeshDesc,
   type SphereChildConfig,
@@ -65,7 +66,7 @@ export class SmokeSystem {
   private static TINT_DECAY = 1.1;
 
   constructor(opts: {
-    view: ThreeView<any>;
+    view: ThreeView<DefaultDescriptions>;
     frame: Matrix4;
     rng: Rng;
     /**

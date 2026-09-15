@@ -14,6 +14,7 @@
  */
 
 import ThreeView, { Color, type MeshHandle } from "@navaramap/three";
+import type { DefaultDescriptions } from "@navaramap/three-default-plugin";
 import {
   InstancedPlaneMeshDesc,
   type PlaneChildConfig,
@@ -49,10 +50,9 @@ export type PedestrianRoute = {
 type Feature = {
   type: "Feature";
   properties?: Record<string, unknown> | null;
-  geometry: {
-    type: "LineString" | "MultiLineString";
-    coordinates: LngLat[] | LngLat[][];
-  };
+  geometry:
+    | { type: "LineString"; coordinates: LngLat[] }
+    | { type: "MultiLineString"; coordinates: LngLat[][] };
 };
 
 export type RouteGeoJson = {
@@ -74,13 +74,16 @@ function fixOrder(c: LngLat): LngLat {
 /** LineString / MultiLineString をまとめて点列の配列に開く。 */
 function toPaths(f: Feature): LngLat[][] {
   const g = f.geometry;
-  const raw =
-    g.type === "MultiLineString"
-      ? (g.coordinates as LngLat[][])
-      : [g.coordinates as LngLat[]];
+  const raw = g.type === "MultiLineString" ? g.coordinates : [g.coordinates];
   return raw
     .map((line) => line.map((c) => fixOrder([Number(c[0]), Number(c[1])])))
     .filter((line) => line.length >= 2);
+}
+
+function isRouteGeoJson(json: unknown): json is RouteGeoJson {
+  if (typeof json !== "object" || json === null) return false;
+  if (!("type" in json) || !("features" in json)) return false;
+  return json.type === "FeatureCollection" && Array.isArray(json.features);
 }
 
 /** GeoJSON を取得する。失敗しても作品全体は動き続ける。 */
@@ -88,10 +91,8 @@ async function loadGeoJson(url: string): Promise<RouteGeoJson | null> {
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = (await res.json()) as RouteGeoJson;
-    if (json?.type !== "FeatureCollection" || !Array.isArray(json.features)) {
-      throw new Error("FeatureCollection ではありません");
-    }
+    const json: unknown = await res.json();
+    if (!isRouteGeoJson(json)) throw new Error("FeatureCollection ではありません");
     return json;
   } catch (e) {
     console.warn(`[traffic] ${url} を読み込めませんでした:`, e);
@@ -192,7 +193,7 @@ export class PedestrianFlow {
   private static DASH_WIDTH = 3.4;
 
   constructor(opts: {
-    view: ThreeView<any>;
+    view: ThreeView<DefaultDescriptions>;
     frame: Matrix4;
     bloomId: string;
     /** 道路面の楕円体高。 */

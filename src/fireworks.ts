@@ -1,4 +1,5 @@
 import ThreeView, { Color, type MeshHandle } from "@navaramap/three";
+import type { DefaultDescriptions } from "@navaramap/three-default-plugin";
 import {
   InstancedSphereMeshDesc,
   type SphereChildConfig,
@@ -133,7 +134,7 @@ function liftVelocityFor(altitude: number): number {
  * - エミッタはプールして使い回す。addMesh/delete を毎発やるとコストが高い。
  */
 export class FireworkSystem {
-  private view: ThreeView<any>;
+  private view: ThreeView<DefaultDescriptions>;
   private frame: Matrix4;
   private bloomId: string;
   private emitters: Emitter[] = [];
@@ -163,7 +164,7 @@ export class FireworkSystem {
   private windVec = new Vector3();
 
   constructor(opts: {
-    view: ThreeView<any>;
+    view: ThreeView<DefaultDescriptions>;
     /** 花火を配置する ENU フレーム（隅田川上の基準点）。 */
     frame: Matrix4;
     /** SelectiveBloom エフェクトの id。 */

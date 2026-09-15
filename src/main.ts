@@ -159,7 +159,7 @@ const nightAmbient = view.addLight<AmbientLightDesc>({
 
 const riverSource = view.addSource({
   type: "geojson",
-  data: buildRiverPolygon(55) as unknown as Record<string, unknown>,
+  data: buildRiverPolygon(55),
 });
 
 const riverLayer = view.addLayer({
@@ -421,9 +421,7 @@ const pedestrianRoutes = await loadPedestrianRoutes();
 // 車両通行止めの区間
 const regulationSource = view.addSource({
   type: "geojson",
-  data: regulationGeoJson(
-    regulationRoutes.filter((r) => r.kind === "vehicle"),
-  ) as unknown as Record<string, unknown>,
+  data: regulationGeoJson(regulationRoutes.filter((r) => r.kind === "vehicle")),
 });
 const regulationLayer = view.addLayer({
   type: "vector",
@@ -445,9 +443,7 @@ const regulationLayer = view.addLayer({
 // 歩行者規制のかかる橋
 const bridgeSource = view.addSource({
   type: "geojson",
-  data: regulationGeoJson(
-    regulationRoutes.filter((r) => r.kind === "bridge"),
-  ) as unknown as Record<string, unknown>,
+  data: regulationGeoJson(regulationRoutes.filter((r) => r.kind === "bridge")),
 });
 const bridgeLayer = view.addLayer({
   type: "vector",
@@ -725,7 +721,7 @@ function applyNight(force = false) {
   const bldg = new Color().setStyle(DAY_BUILDING);
   bldg.raw.lerp(new Color().setStyle(NIGHT_BUILDING).raw, night);
   for (const layer of buildingLayers) {
-    layer.update({ type: "3d-tiles", model: { color: bldg } } as never);
+    layer.update({ type: "3d-tiles", model: { color: bldg } });
   }
 }
 
@@ -1300,7 +1296,25 @@ if (loading) {
 }
 
 // デバッグ用にコンソールから触れるようにしておく
-Object.assign(window as any, {
+declare global {
+  interface Window {
+    view: typeof view;
+    fireworks: typeof fireworks;
+    smoke: typeof smoke;
+    program: typeof program;
+    state: typeof state;
+    buildingLayers: typeof buildingLayers;
+    riverLayer: typeof riverLayer;
+    rain: typeof rain;
+    ssr: typeof ssr;
+    roadLayer: typeof roadLayer;
+    regulationLayer: typeof regulationLayer;
+    bridgeLayer: typeof bridgeLayer;
+    pedestrianFlow: typeof pedestrianFlow;
+    applyNight: typeof applyNight;
+  }
+}
+Object.assign(window, {
   view,
   fireworks,
   smoke,
