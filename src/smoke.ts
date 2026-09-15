@@ -2,7 +2,7 @@ import ThreeView, { Color, type MeshHandle } from "@navaramap/three";
 import {
   InstancedSphereMeshDesc,
   type SphereChildConfig,
-} from "@navaramap/three_default_descs";
+} from "@navaramap/three-default-descs";
 import { Matrix4, Vector3 } from "three";
 import type { Rng } from "./rng";
 

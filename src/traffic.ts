@@ -17,7 +17,7 @@ import ThreeView, { Color, type MeshHandle } from "@navaramap/three";
 import {
   InstancedPlaneMeshDesc,
   type PlaneChildConfig,
-} from "@navaramap/three_default_descs";
+} from "@navaramap/three-default-descs";
 import { Matrix4, Vector3 } from "three";
 import { enuOffset, type Geodetic } from "./geo";
 import { REFERENCE } from "./viewpoints";

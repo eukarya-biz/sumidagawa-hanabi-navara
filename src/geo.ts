@@ -1,8 +1,6 @@
 import {
-  degreeToRadian,
   eastNorthUpToFixedFrame,
   geodeticToVector3,
-  radianToDegree,
   vector3ToGeodetic,
 } from "@navaramap/three";
 import { Matrix4, Vector3 } from "three";
@@ -20,11 +18,7 @@ export const TOKYO_GEOID_HEIGHT = 37;
 
 /** 度指定の測地座標を ECEF 座標に変換する。 */
 export function toEcef(g: Geodetic): Vector3 {
-  return geodeticToVector3({
-    lng: degreeToRadian(g.lng),
-    lat: degreeToRadian(g.lat),
-    height: g.height,
-  }) as unknown as Vector3;
+  return geodeticToVector3(g);
 }
 
 /**
@@ -33,7 +27,7 @@ export function toEcef(g: Geodetic): Vector3 {
  * 「東 x / 北 y / 上 z（メートル）」で書けるようになる。
  */
 export function enuFrame(g: Geodetic): Matrix4 {
-  return eastNorthUpToFixedFrame(toEcef(g)) as unknown as Matrix4;
+  return eastNorthUpToFixedFrame(toEcef(g));
 }
 
 /** 2 地点間の直線距離（m）。音の遅延計算に使う。 */
@@ -43,12 +37,7 @@ export function distanceMeters(a: Geodetic, b: Geodetic): number {
 
 /** ECEF 座標を度指定の測地座標に戻す。クリックした地点を求めるのに使う。 */
 export function fromEcef(v: Vector3): Geodetic {
-  const lle = vector3ToGeodetic(v as any);
-  return {
-    lng: radianToDegree(lle.lng),
-    lat: radianToDegree(lle.lat),
-    height: lle.height,
-  };
+  return vector3ToGeodetic(v);
 }
 
 /**

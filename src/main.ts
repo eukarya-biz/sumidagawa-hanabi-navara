@@ -1,17 +1,16 @@
 import ThreeView, {
   CameraDirection,
   Color,
-  degreeToRadian,
   geodeticSurfaceNormal,
 } from "@navaramap/three";
-import { DefaultDescriptions, DefaultPlugin } from "@navaramap/three_default_plugin";
+import { DefaultDescriptions, DefaultPlugin } from "@navaramap/three-default-plugin";
 import type {
   CloudsEffectDesc,
   RainMeshDesc,
   SelectiveBloomEffectDesc,
   SSREffectDesc,
   AmbientLightDesc,
-} from "@navaramap/three_default_descs";
+} from "@navaramap/three-default-descs";
 import { Matrix4, Vector3 } from "three";
 
 import {
@@ -242,7 +241,7 @@ const ssr = view.addEffect<SSREffectDesc>({
   ssr: {
     resolutionScale: 0.5,
     // ぼかしのカーネルは奇数。水面の反射を少しにじませる。
-    kernelSize: 3,
+    resolveKernelSize: 3,
     useConeTracing: true,
     coneTracingMaxDistance: 3000,
     // 画面端の反射は破綻しやすいので早めにフェードさせる
@@ -270,8 +269,8 @@ function groundHeight(lng: number, lat: number): number {
 /** 地形の高さを監視し、判明したらキャッシュして callback を呼ぶ。 */
 function watchGround(lng: number, lat: number, onResolved?: (h: number) => void) {
   const key = groundKey(lng, lat);
-  const pos = { lng: degreeToRadian(lng), lat: degreeToRadian(lat) };
-  const immediate = view.sampleTerrainHeight({ ...pos, height: 0 });
+  const pos = { lng, lat };
+  const immediate = view.sampleTerrainHeight(pos);
   if (immediate !== undefined) {
     groundCache.set(key, immediate);
     onResolved?.(immediate);
@@ -649,8 +648,8 @@ function applyExposure(_v?: number) {
 
 /** 基準点における地表法線（真上の向き）。太陽高度の計算に使う。 */
 const localUp = geodeticSurfaceNormal({
-  lng: degreeToRadian(REFERENCE.lng),
-  lat: degreeToRadian(REFERENCE.lat),
+  lng: REFERENCE.lng,
+  lat: REFERENCE.lat,
   height: 0,
 });
 
@@ -906,7 +905,7 @@ function setFreeCamera(on: boolean, animate = true) {
     // 両会場が入る高さまで引いて、見下ろす姿勢にする
     // 蔵前橋の上空から北北西を見下ろす。両会場が左右 ±27 度に収まる構図。
     const cam = { ...FREE_CAMERA_HOME };
-    if (animate) view.flyTo(cam, 1600, 2600);
+    if (animate) view.flyTo(cam, { duration: 1600, maxHeight: 2600 });
     else view.setCamera(cam);
   } else {
     gotoViewpoint(state.viewpoint);
@@ -944,8 +943,7 @@ canvas.addEventListener("dblclick", (e) => {
       pitch: o.pitch ?? 10,
       heading: o.heading ?? 0,
     },
-    1400,
-    Math.max(400, g.height + 500),
+    { duration: 1400, maxHeight: Math.max(400, g.height + 500) },
   );
 });
 
@@ -1026,7 +1024,7 @@ function gotoViewpoint(vp: Viewpoint, animate = true) {
       pitch: vp.pitch,
       heading,
     };
-    if (animate) view.flyTo(cam, 2400, 3000);
+    if (animate) view.flyTo(cam, { duration: 2400, maxHeight: 3000 });
     else view.setCamera(cam);
     return;
   }
@@ -1038,7 +1036,7 @@ function gotoViewpoint(vp: Viewpoint, animate = true) {
     pitch: vp.pitch,
     heading,
   };
-  if (animate) view.flyTo(cam, 2200, Math.max(1500, pos.height + 900));
+  if (animate) view.flyTo(cam, { duration: 2200, maxHeight: Math.max(1500, pos.height + 900) });
   else view.setCamera(cam);
 
   if (vp.freeLook) {
