@@ -25,12 +25,18 @@ import {
 } from "./geo";
 import { FireworkSystem } from "./fireworks";
 import { SmokeSystem } from "./smoke";
-import { buildRiverPolygon } from "./river";
 import {
+  loadRiver,
+  projectOnCenterline,
+  riversideNoEntry,
+  riverSurface,
+} from "./river";
+import {
+  areaOutlineGeoJson,
+  areaPolygonGeoJson,
+  loadAreas,
   loadPedestrianRoutes,
-  loadRegulationRoutes,
   PedestrianFlow,
-  regulationGeoJson,
 } from "./traffic";
 import { PROGRAM_LENGTH, ShowProgram, type Venue } from "./program";
 import { HanabiAudio, SPEED_OF_SOUND } from "./audio";
@@ -67,6 +73,16 @@ await view.init();
 
 // 空・星・太陽・大気・トーンマッピング・アンチエイリアスを一括で用意する
 defaultPlugin.addDefaultPhotorealScene();
+
+// ---------------------------------------------------------------------------
+// 隅田川の中心線
+//
+// 水面・川沿いの立入禁止帯・打ち上げ位置・橋の上の視点は、
+// すべてこの 1 本の線から決まる。編集するのは
+// public/data/river-centerline.geojson だけでよい。
+// ---------------------------------------------------------------------------
+
+const river = await loadRiver();
 
 // ---------------------------------------------------------------------------
 // 地図データ
@@ -160,7 +176,7 @@ const nightAmbient = view.addLight<AmbientLightDesc>({
 
 const riverSource = view.addSource({
   type: "geojson",
-  data: buildRiverPolygon(55) as unknown as Record<string, unknown>,
+  data: riverSurface(river) as unknown as Record<string, unknown>,
 });
 
 const riverLayer = view.addLayer({
@@ -237,6 +253,45 @@ const rain = view.addMesh<RainMeshDesc>({
  * 画面に写っているものだけが反射に使える方式なので、
  * 花火と川面が同じ画面に入っているときに効きます。
  * 花火だけを見上げて川が画面外にあるときは、当然映りません。
+ *
+ * 【花火を水面に映そうとして、やめた経緯】
+ * 既定では岸の明かりしか映らない。原因は次の 2 つで、どちらも変えれば
+ * 花火の映り込み自体は出せることを確認した。
+ *
+ *   - `maxRayDistance`（反射光線が進める距離の上限、m）の既定が 10 m。
+ *     花火は上空 250〜330 m で開くので、光線がまったく届かない。
+ *   - `iterations`（光線が画面上を探索する回数）の既定が 200。
+ *     歩幅は 1 px 固定なので、これは「画面上で何 px 先まで探せるか」に等しい。
+ *     SSR は 0.5 倍解像度で動くため、実画面では約 400 px しか届かない。
+ *     水面のピクセルから上空の花火までは画面上でそれ以上離れている。
+ *
+ * `maxRayDistance: 2200` + `iterations: 900` で花火は映った。
+ * ただし見た目が成立しなかったため採用していない。
+ *
+ *   - 遠くの水面は視線に対してほぼ真横（すれすれの角度）になるため、
+ *     反射が縦につぶれて水平線上に白い団子として積み上がる。
+ *   - 光線が遠くまで飛べるようになった結果、無関係な地形や建物を拾い、
+ *     手前の川面に黒い塊や横線が出る。
+ *
+ * どちらも SSR（画面に写っているものだけを反射に使う方式）の原理的な限界で、
+ * パラメータでは解決できない。水面に正しく花火を映すには、
+ * 水面から見た平面反射（リフレクションカメラ）が必要になる。
+ * 詳細は FEEDBACK.md に記載。
+ *
+ * 【触ってはいけないパラメータ】
+ * `pixelStride`（光線が 1 ステップで進む画面上の距離）と
+ * `pixelStrideZCutoff`（歩幅を広げてよいカメラからの距離）は既定のままにする。
+ *
+ * シェーダはこう計算している:
+ *   strideScaler = 1 - min(1, カメラからの距離 / pixelStrideZCutoff)
+ *   実際の歩幅   = 1 + strideScaler * pixelStride
+ *
+ * 既定の cutoff は 100 m。川面はほぼ全部それより遠いので strideScaler が 0 になり、
+ * 歩幅は常に 1 px に落ち着く。さらに「歩幅 > 1 のときだけ走る二分探索」も
+ * 走らないので、当たり位置は素直に決まる。
+ *
+ * ここを引き上げて歩幅を約 10 px にしたところ、二分探索が有効になり、
+ * 水面の映り込みが丸ごと消えた。速くはなるが結果が合わない。
  */
 const ssr = view.addEffect<SSREffectDesc>({
   ssr: {
@@ -290,16 +345,24 @@ function watchGround(lng: number, lat: number, onResolved?: (h: number) => void)
 /** 全ての花火を配置する ENU 接平面フレーム（隅田川の基準点、楕円体高 0）。 */
 const frame: Matrix4 = enuFrame(REFERENCE);
 
-/** 会場の打ち上げ区間（2 つの橋を結ぶ線分）を ENU ローカルに落とす。 */
+/**
+ * 会場の打ち上げ区間（2 つの橋を結ぶ線分）を ENU ローカルに落とす。
+ *
+ * 橋の座標は国土地理院の地名検索によるものだが、それが川の中心とは限らない。
+ * そのまま使うと打ち上げ位置が川からはみ出すので、
+ * **描いた中心線に投影してから**区間を作る。
+ */
 function buildVenue(site: (typeof VENUE_SITES)[number]): Venue {
   const c = venueCenter(site);
   // 水面の高さは会場中央の地形高さで代表させる
   const h = groundHeight(c.lng, c.lat);
+  const [aLng, aLat] = projectOnCenterline(river, [site.from.lng, site.from.lat]);
+  const [bLng, bLat] = projectOnCenterline(river, [site.to.lng, site.to.lat]);
   return {
     id: site.id,
     name: site.name,
-    a: enuOffset(REFERENCE, { ...site.from, height: h }),
-    b: enuOffset(REFERENCE, { ...site.to, height: h }),
+    a: enuOffset(REFERENCE, { lng: aLng, lat: aLat, height: h }),
+    b: enuOffset(REFERENCE, { lng: bLng, lat: bLat, height: h }),
     span: site.span,
     across: site.across,
   };
@@ -416,53 +479,88 @@ const roadLayer = view.addLayer({
 const ROAD_GROUND = groundHeight(REFERENCE.lng, REFERENCE.lat);
 
 // データは public/data/ の GeoJSON から読む。差し替えればそのまま反映される。
-const regulationRoutes = await loadRegulationRoutes();
+const regulationAreas = await loadAreas("data/regulation-area.geojson", "regulation");
+const reducedAreas = await loadAreas("data/regulation-area-reduced.geojson", "reduced");
+const noEntryAreas = await loadAreas("data/no-entry.geojson", "no-entry");
 const pedestrianRoutes = await loadPedestrianRoutes();
 
-// 車両通行止めの区間
+const asData = (o: unknown) => o as unknown as Record<string, unknown>;
+
+/**
+ * 交通規制区域（PM6:00〜9:30）。
+ * 公式図では塗りつぶさず境界線だけなので、リングを線に変換して描く。
+ */
 const regulationSource = view.addSource({
   type: "geojson",
-  data: regulationGeoJson(
-    regulationRoutes.filter((r) => r.kind === "vehicle"),
-  ) as unknown as Record<string, unknown>,
+  data: asData(areaOutlineGeoJson(regulationAreas)),
 });
 const regulationLayer = view.addLayer({
   type: "vector",
   source: regulationSource,
   polyline: {
     show: true,
-    // 地形に貼り付ける。起伏があっても道路から浮かない。
+    // 地形に貼り付ける。起伏があっても浮かない。
     clampToGround: true,
-    width: 9,
-    maxWidth: 14,
-    color: new Color().setStyle("#ff4d4d"),
+    width: 7,
+    maxWidth: 10,
+    color: new Color().setStyle("#3d8bff"),
     emissiveIntensity: 0.95,
     effectIds: [bloom.id],
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.9,
   },
 });
 
-// 歩行者規制のかかる橋
-const bridgeSource = view.addSource({
+/** 縮小規制区域（PM9:30〜10:00）。同じく境界線だけ。 */
+const reducedSource = view.addSource({
   type: "geojson",
-  data: regulationGeoJson(
-    regulationRoutes.filter((r) => r.kind === "bridge"),
-  ) as unknown as Record<string, unknown>,
+  data: asData(areaOutlineGeoJson(reducedAreas)),
 });
-const bridgeLayer = view.addLayer({
+const reducedLayer = view.addLayer({
   type: "vector",
-  source: bridgeSource,
+  source: reducedSource,
   polyline: {
     show: true,
     clampToGround: true,
-    width: 11,
-    maxWidth: 18,
-    color: new Color().setStyle("#ffd24d"),
+    width: 6,
+    maxWidth: 9,
+    color: new Color().setStyle("#3ddc84"),
     emissiveIntensity: 0.95,
     effectIds: [bloom.id],
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.9,
+  },
+});
+
+/**
+ * 立入禁止区域。公式図では赤く塗りつぶされている領域。
+ * 川の両岸の親水テラス・隅田公園などが連続した帯になっている。
+ */
+// 川沿いの帯は中心線から生成し、手で描いた区域（隅田公園など）はファイルから読む。
+// こうしておくと、中心線を動かしたときに帯が自動で追従する。
+const noEntryData = {
+  type: "FeatureCollection" as const,
+  features: [
+    ...riversideNoEntry(river).features,
+    ...areaPolygonGeoJson(noEntryAreas).features,
+  ],
+};
+const noEntrySource = view.addSource({
+  type: "geojson",
+  data: asData(noEntryData),
+});
+const noEntryLayer = view.addLayer({
+  type: "vector",
+  source: noEntrySource,
+  polygon: {
+    show: true,
+    // 地形に貼り付ける。河川敷の起伏に沿う。
+    clampToGround: true,
+    color: new Color().setStyle("#ff3b2f"),
+    emissiveIntensity: 0.5,
+    effectIds: [bloom.id],
+    transparent: true,
+    opacity: 0.32,
   },
 });
 
@@ -504,8 +602,10 @@ const state = {
   roadGlow: true,
   /** 道路の光の強さ 0〜1。 */
   roadGlowStrength: 0.45,
-  /** 交通規制の表示。 */
+  /** 交通規制区域・縮小規制区域（境界線）の表示。 */
   showRegulation: false,
+  /** 立入禁止区域（赤い面）の表示。 */
+  showNoEntry: false,
   /** 歩行者進行方向の表示。 */
   showPedestrian: false,
   /** 水面の映り込みの強さ 0〜1。 */
@@ -754,17 +854,22 @@ function applyRoadGlow() {
   });
 }
 
-/** 交通規制と歩行者動線の表示を切り替える。 */
+/** 交通規制まわりのレイヤーの表示を切り替える。 */
 function applyTraffic() {
   regulationLayer.update({
     type: "vector",
     source: regulationSource,
     polyline: { show: state.showRegulation },
   });
-  bridgeLayer.update({
+  reducedLayer.update({
     type: "vector",
-    source: bridgeSource,
+    source: reducedSource,
     polyline: { show: state.showRegulation },
+  });
+  noEntryLayer.update({
+    type: "vector",
+    source: noEntrySource,
+    polygon: { show: state.showNoEntry },
   });
   pedestrianFlow.setVisible(state.showPedestrian);
 }
@@ -791,12 +896,13 @@ function applyWater() {
 
 /** 視点の実際の測地座標（地形の高さ + 目線の高さ）。 */
 function viewpointGeodetic(vp: Viewpoint): Geodetic {
+  // 橋の上の視点は川の中心線に載せる。橋の名称の代表点は端に寄っていることがあり、
+  // そのまま使うと川から外れた場所に立つことになる。
+  const [lng, lat] = vp.onRiver
+    ? projectOnCenterline(river, [vp.lng, vp.lat])
+    : [vp.lng, vp.lat];
   // スカイツリーのような構造物上の視点は、地面 + 建物高さとして扱う
-  return {
-    lng: vp.lng,
-    lat: vp.lat,
-    height: groundHeight(vp.lng, vp.lat) + vp.eye,
-  };
+  return { lng, lat, height: groundHeight(lng, lat) + vp.eye };
 }
 
 /** 見上げる対象（開花点のあたり）。 */
@@ -1132,6 +1238,10 @@ const ui = buildUi({
     state.showRegulation = v;
     applyTraffic();
   },
+  onNoEntry: (v) => {
+    state.showNoEntry = v;
+    applyTraffic();
+  },
   onPedestrian: (v) => {
     state.showPedestrian = v;
     applyTraffic();
@@ -1314,7 +1424,8 @@ Object.assign(window as any, {
   ssr,
   roadLayer,
   regulationLayer,
-  bridgeLayer,
+  reducedLayer,
+  noEntryLayer,
   pedestrianFlow,
   applyNight,
 });

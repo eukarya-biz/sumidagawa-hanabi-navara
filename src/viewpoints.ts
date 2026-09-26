@@ -103,6 +103,12 @@ export type Viewpoint = {
    * 広い範囲を 1 画面に入れたいときに広げる。
    */
   fov?: number;
+  /**
+   * true のとき、位置を川の中心線上に投影してから使う。
+   * 橋の上に立つ視点は、川の中心に載せた方が構図が安定する。
+   * 橋の名称の代表点は端に寄っていることがあるため。
+   */
+  onRiver?: boolean;
 };
 
 /**
@@ -113,6 +119,7 @@ export type Viewpoint = {
 export const VIEWPOINTS: Viewpoint[] = [
   {
     id: "sakurabashi",
+    onRiver: true,
     name: "桜橋の上",
     note: "第一会場の上流端。歩行者専用橋の上から至近距離で見上げる。",
     lng: BRIDGES.桜橋.lng,
@@ -135,6 +142,7 @@ export const VIEWPOINTS: Viewpoint[] = [
   },
   {
     id: "kuramaebashi",
+    onRiver: true,
     name: "蔵前橋の上",
     note: "第二会場のすぐ下流。近い会場の音だけが先に届く。",
     lng: BRIDGES.蔵前橋.lng,
@@ -162,6 +170,7 @@ export const VIEWPOINTS: Viewpoint[] = [
   },
   {
     id: "ryogokubashi",
+    onRiver: true,
     name: "両国橋の上",
     note: "両会場を一望できる下流側。音が二重に届く。",
     lng: BRIDGES.両国橋.lng,

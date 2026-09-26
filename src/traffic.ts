@@ -1,16 +1,19 @@
 /**
- * 交通規制と歩行者動線。
+ * 交通規制・立入禁止区域・歩行者動線。
  *
  * データは TypeScript ではなく **GeoJSON ファイル**で持っています。
  *
- *   public/data/traffic-regulation.geojson   交通規制区間
- *   public/data/pedestrian-flow.geojson      歩行者の進行方向
+ *   public/data/regulation-area.geojson          交通規制区域（PM6:00〜9:30）
+ *   public/data/regulation-area-reduced.geojson  縮小規制区域（PM9:30〜10:00）
+ *   public/data/no-entry.geojson                 立入禁止区域
+ *   public/data/pedestrian-flow.geojson          歩行者の進行方向
  *
- * この 2 つを差し替えれば表示が変わります。コードを触る必要はありません。
- * 仕様は README の「交通規制と歩行者動線」を参照してください。
+ * これらを差し替えれば表示が変わります。コードを触る必要はありません。
  *
- * ⚠️ 同梱しているのは概略値です。公式の道路規制図は文字情報を持たない
- * 画像 PDF のため機械的に読み取れませんでした。実際の通行判断には使えません。
+ * ⚠️ 同梱データは公式の「道路規制図」（令和8年 第49回）を読み取って
+ * 起こしたものですが、元図が模式図のため位置は概略です。
+ * 橋と駅は国土地理院の実測座標に寄せていますが、区域境界は ±150 m 程度の
+ * 誤差があります。実際の通行判断には使えません。
  */
 
 import ThreeView, { Color, type MeshHandle } from "@navaramap/three";
@@ -25,12 +28,15 @@ import { REFERENCE } from "./viewpoints";
 /** 経度・緯度の組。 */
 type LngLat = [number, number];
 
-/** 交通規制の区間。 */
-export type RegulationRoute = {
+/** 区域（交通規制区域・縮小規制区域・立入禁止区域）。 */
+export type RegulationArea = {
   name: string;
-  /** 規制の種類。色分けに使う。 */
-  kind: "vehicle" | "bridge";
-  path: LngLat[];
+  /** 表示上の種別。 */
+  kind: "regulation" | "reduced" | "no-entry";
+  /** 規制時間帯（図に書かれているもの）。 */
+  time?: string;
+  /** 外周のリング。 */
+  ring: LngLat[];
 };
 
 /** 歩行者の進行方向（一方通行の動線）。 */
@@ -50,14 +56,24 @@ type Feature = {
   type: "Feature";
   properties?: Record<string, unknown> | null;
   geometry: {
-    type: "LineString" | "MultiLineString";
-    coordinates: LngLat[] | LngLat[][];
+    type: "LineString" | "MultiLineString" | "Polygon" | "MultiPolygon";
+    coordinates: LngLat[] | LngLat[][] | LngLat[][][];
   };
 };
 
 export type RouteGeoJson = {
   type: "FeatureCollection";
   features: Feature[];
+};
+
+/** レイヤーに渡す GeoJSON（Navara 側は構造しか見ない）。 */
+type OutGeoJson = {
+  type: "FeatureCollection";
+  features: {
+    type: "Feature";
+    properties: Record<string, unknown>;
+    geometry: { type: string; coordinates: unknown };
+  }[];
 };
 
 /**
@@ -83,6 +99,20 @@ function toPaths(f: Feature): LngLat[][] {
     .filter((line) => line.length >= 2);
 }
 
+/** Polygon / MultiPolygon の外周リングを取り出す。 */
+function toRings(f: Feature): LngLat[][] {
+  const g = f.geometry;
+  const raw =
+    g.type === "MultiPolygon"
+      ? (g.coordinates as LngLat[][][]).map((p) => p[0]!)
+      : g.type === "Polygon"
+        ? [(g.coordinates as LngLat[][])[0]!]
+        : [];
+  return raw
+    .map((ring) => ring.map((c) => fixOrder([Number(c[0]), Number(c[1])])))
+    .filter((ring) => ring.length >= 4);
+}
+
 /** GeoJSON を取得する。失敗しても作品全体は動き続ける。 */
 async function loadGeoJson(url: string): Promise<RouteGeoJson | null> {
   try {
@@ -99,18 +129,23 @@ async function loadGeoJson(url: string): Promise<RouteGeoJson | null> {
   }
 }
 
-/** 交通規制区間を読み込む。 */
-export async function loadRegulationRoutes(
-  url = "data/traffic-regulation.geojson",
-): Promise<RegulationRoute[]> {
+/**
+ * 区域の GeoJSON を読み込む。
+ * @param kind この区域の種別（ファイルごとに固定）
+ */
+export async function loadAreas(
+  url: string,
+  kind: RegulationArea["kind"],
+): Promise<RegulationArea[]> {
   const json = await loadGeoJson(url);
   if (!json) return [];
-  const out: RegulationRoute[] = [];
+  const out: RegulationArea[] = [];
   for (const f of json.features) {
     const name = String(f.properties?.["name"] ?? "");
-    const kindRaw = String(f.properties?.["kind"] ?? "vehicle");
-    const kind: RegulationRoute["kind"] = kindRaw === "bridge" ? "bridge" : "vehicle";
-    for (const path of toPaths(f)) out.push({ name, kind, path });
+    const time = f.properties?.["time"];
+    for (const ring of toRings(f)) {
+      out.push({ name, kind, ring, time: typeof time === "string" ? time : undefined });
+    }
   }
   return out;
 }
@@ -140,13 +175,30 @@ export async function loadPedestrianRoutes(
 // GeoJSON への変換（レイヤーに渡す用）
 // ---------------------------------------------------------------------------
 
-export function regulationGeoJson(routes: RegulationRoute[]): RouteGeoJson {
+/** 区域をそのまま面として描くための GeoJSON。 */
+export function areaPolygonGeoJson(areas: RegulationArea[]): OutGeoJson {
   return {
     type: "FeatureCollection",
-    features: routes.map((r) => ({
+    features: areas.map((a) => ({
       type: "Feature",
-      properties: { name: r.name, kind: r.kind },
-      geometry: { type: "LineString", coordinates: r.path },
+      properties: { name: a.name, kind: a.kind },
+      geometry: { type: "Polygon", coordinates: [a.ring] },
+    })),
+  };
+}
+
+/**
+ * 区域の**外周線**だけを描くための GeoJSON。
+ * 公式図では交通規制区域と縮小規制区域は塗りつぶさず境界線だけなので、
+ * リングを LineString に変換して線として描く。
+ */
+export function areaOutlineGeoJson(areas: RegulationArea[]): OutGeoJson {
+  return {
+    type: "FeatureCollection",
+    features: areas.map((a) => ({
+      type: "Feature",
+      properties: { name: a.name, kind: a.kind },
+      geometry: { type: "LineString", coordinates: a.ring },
     })),
   };
 }
