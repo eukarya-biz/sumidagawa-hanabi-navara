@@ -88,6 +88,36 @@ function fixOrder(c: LngLat): LngLat {
 }
 
 /** LineString / MultiLineString をまとめて点列の配列に開く。 */
+/**
+ * 連続する同じ座標を取り除く。
+ *
+ * QGIS で頂点を打つときにダブルクリックが入ると、まったく同じ点が
+ * 2 つ並んだまま保存される。目で見ても形は変わらないので気づきにくい。
+ *
+ * ところが線として描くと、同じ点が 2 つ並んだ区間は長さがゼロになり、
+ * 線の向き（法線）が計算できず NaN になる。
+ * Navara は複数の地物を 1 つのメッシュにまとめて描くため、
+ * 1 本でも NaN が混じるとバウンディングスフィアが NaN になり、
+ * 「画面の外にある」と判定されて **そのレイヤーが丸ごと消える**。
+ *
+ * 読み込み直後は見えているのに、少し経つと消えるという症状が出る。
+ * 実際に立入禁止区域で発生した（規制区域は重複がなかったので無事だった）。
+ *
+ * 許容誤差は緯度経度で 1e-9 度。地上では 0.1 mm 未満なので、
+ * 意図して置いた頂点を消してしまう心配はない。
+ */
+function dropDuplicates(points: LngLat[]): LngLat[] {
+  const out: LngLat[] = [];
+  for (const p of points) {
+    const prev = out[out.length - 1];
+    if (prev && Math.abs(prev[0] - p[0]) < 1e-9 && Math.abs(prev[1] - p[1]) < 1e-9) {
+      continue;
+    }
+    out.push(p);
+  }
+  return out;
+}
+
 function toPaths(f: Feature): LngLat[][] {
   const g = f.geometry;
   const raw =
@@ -95,7 +125,7 @@ function toPaths(f: Feature): LngLat[][] {
       ? (g.coordinates as LngLat[][])
       : [g.coordinates as LngLat[]];
   return raw
-    .map((line) => line.map((c) => fixOrder([Number(c[0]), Number(c[1])])))
+    .map((line) => dropDuplicates(line.map((c) => fixOrder([Number(c[0]), Number(c[1])]))))
     .filter((line) => line.length >= 2);
 }
 
@@ -109,7 +139,7 @@ function toRings(f: Feature): LngLat[][] {
         ? [(g.coordinates as LngLat[][])[0]!]
         : [];
   return raw
-    .map((ring) => ring.map((c) => fixOrder([Number(c[0]), Number(c[1])])))
+    .map((ring) => dropDuplicates(ring.map((c) => fixOrder([Number(c[0]), Number(c[1])]))))
     .filter((ring) => ring.length >= 4);
 }
 

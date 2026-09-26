@@ -33,7 +33,6 @@ import {
 } from "./river";
 import {
   areaOutlineGeoJson,
-  areaPolygonGeoJson,
   loadAreas,
   loadPedestrianRoutes,
   PedestrianFlow,
@@ -533,18 +532,60 @@ const reducedLayer = view.addLayer({
 });
 
 /**
- * 立入禁止区域。公式図では赤く塗りつぶされている領域。
- * 川の両岸の親水テラス・隅田公園などが連続した帯になっている。
+ * 立入禁止区域（隅田公園・大会本部など）の輪郭線。
+ *
+ * ⚠️ この 3 つのポリラインレイヤーは **必ず連続して作ること**。
+ *
+ * もともとこのレイヤーは、下の塗りつぶし（ポリゴン）レイヤーを作ったあとに
+ * 追加していた。すると、設定もデータも交通規制区域とまったく同じなのに、
+ * 読み込み直後の数秒だけ描かれて、そのあと消えるという症状が出た。
+ * エラーも警告も出ない。
+ *
+ * 切り分けの結果:
+ *   - データは届いている（console で 5 件確認）
+ *   - ジオメトリの大きさは無関係（大きいリングを混ぜても同じく消えた）
+ *   - 明るさ・ブルームは無関係（昼にしても出ない）
+ *   - 更新経路は無関係（設定を毎回全部渡しても同じ）
+ *   - 同じデータを交通規制区域のレイヤーに相乗りさせると **正しく描かれた**
+ *
+ * つまり原因はデータではなく、レイヤーを作る順番にある。
+ * clampToGround のポリゴンレイヤーより後にポリラインレイヤーを作ると
+ * 描画されなくなる、という Navara 側の問題と見ている。
+ * 詳細は FEEDBACK.md に記載。
  */
-// 川沿いの帯は中心線から生成し、手で描いた区域（隅田公園など）はファイルから読む。
-// こうしておくと、中心線を動かしたときに帯が自動で追従する。
-const noEntryData = {
-  type: "FeatureCollection" as const,
-  features: [
-    ...riversideNoEntry(river).features,
-    ...areaPolygonGeoJson(noEntryAreas).features,
-  ],
-};
+const noEntryOutlineSource = view.addSource({
+  type: "geojson",
+  data: asData(areaOutlineGeoJson(noEntryAreas)),
+});
+const noEntryOutlineLayer = view.addLayer({
+  type: "vector",
+  source: noEntryOutlineSource,
+  polyline: {
+    show: true,
+    clampToGround: true,
+    // 値は交通規制区域（青）・縮小規制区域（緑）と揃えている。
+    // 立入禁止だけ描き方が違うと、凡例として読みにくくなるため。
+    width: 7,
+    maxWidth: 10,
+    // 公式図と塗りつぶしの帯に合わせて赤。青・緑と並ぶ 3 色目。
+    color: new Color().setStyle("#ff3b2f"),
+    emissiveIntensity: 0.95,
+    effectIds: [bloom.id],
+    transparent: true,
+    opacity: 0.9,
+  },
+});
+
+/**
+ * 川沿いの立入禁止の帯（両岸の親水テラス）。こちらは塗りつぶし。
+ *
+ * 河川敷には建物がないので、塗りつぶしでも隠れない。
+ * 一方、市街地のブロックに載る区域を塗りつぶすと PLATEAU の建物に
+ * 覆われてしまうので、そちらは上の輪郭線で描き分けている。
+ *
+ * 中心線から生成しているため、中心線を動かすと自動で追従する。
+ */
+const noEntryData = riversideNoEntry(river);
 const noEntrySource = view.addSource({
   type: "geojson",
   data: asData(noEntryData),
@@ -870,6 +911,11 @@ function applyTraffic() {
     type: "vector",
     source: noEntrySource,
     polygon: { show: state.showNoEntry },
+  });
+  noEntryOutlineLayer.update({
+    type: "vector",
+    source: noEntryOutlineSource,
+    polyline: { show: state.showNoEntry },
   });
   pedestrianFlow.setVisible(state.showPedestrian);
 }
@@ -1426,6 +1472,7 @@ Object.assign(window as any, {
   regulationLayer,
   reducedLayer,
   noEntryLayer,
+  noEntryOutlineLayer,
   pedestrianFlow,
   applyNight,
 });
