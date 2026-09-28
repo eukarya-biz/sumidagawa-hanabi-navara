@@ -475,8 +475,6 @@ const roadLayer = view.addLayer({
 // ⚠️ 座標は概略値。公式の道路規制図と照合して差し替えること（src/traffic.ts）。
 // ---------------------------------------------------------------------------
 
-const ROAD_GROUND = groundHeight(REFERENCE.lng, REFERENCE.lat);
-
 // データは public/data/ の GeoJSON から読む。差し替えればそのまま反映される。
 const regulationAreas = await loadAreas("data/regulation-area.geojson", "regulation");
 const reducedAreas = await loadAreas("data/regulation-area-reduced.geojson", "reduced");
@@ -610,9 +608,40 @@ const pedestrianFlow = new PedestrianFlow({
   view,
   frame,
   bloomId: bloom.id,
-  groundHeight: ROAD_GROUND,
+  groundAt: groundHeight,
   routes: pedestrianRoutes,
 });
+
+/**
+ * 動線の各点の地形高さを取りにいく。
+ *
+ * 以前は REFERENCE 1 地点の標高を全動線に使い回していたため、
+ * 地面が上がっていく台東区側で矢印が地中に埋まり、
+ * 隅田川の西側だけ動線が見えない状態になっていた。
+ *
+ * 地形はタイルで非同期に届くので、判明するたびに作り直す。
+ * 点ごとに毎回作り直すと無駄なので、1 フレームにまとめる。
+ */
+{
+  let pending = false;
+  const scheduleRebuild = () => {
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => {
+      pending = false;
+      pedestrianFlow.rebuild();
+    });
+  };
+  const seen = new Set<string>();
+  for (const route of pedestrianRoutes) {
+    for (const [lng, lat] of route.path) {
+      const key = `${lng.toFixed(5)},${lat.toFixed(5)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      watchGround(lng, lat, scheduleRebuild);
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // 天候・時刻の状態
