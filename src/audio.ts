@@ -1,6 +1,13 @@
 /** 気温 20°C における音速 (m/s)。 */
 export const SPEED_OF_SOUND = 343;
 
+declare global {
+  interface Window {
+    /** Safari 用のベンダープレフィックス付き AudioContext。 */
+    webkitAudioContext?: typeof AudioContext;
+  }
+}
+
 /**
  * 花火の音を、視点までの距離に応じて遅らせて鳴らす。
  *
@@ -37,7 +44,7 @@ export class HanabiAudio {
   /** ユーザー操作の中から呼ぶ必要がある（ブラウザの自動再生制限）。 */
   async enable(): Promise<void> {
     if (this._enabled) return;
-    const Ctor = window.AudioContext ?? (window as any).webkitAudioContext;
+    const Ctor = window.AudioContext ?? window.webkitAudioContext;
     if (!Ctor) return;
     const ctx: AudioContext = new Ctor();
     await ctx.resume();

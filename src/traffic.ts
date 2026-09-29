@@ -17,10 +17,11 @@
  */
 
 import ThreeView, { Color, type MeshHandle } from "@navaramap/three";
+import type { DefaultDescriptions } from "@navaramap/three-default-plugin";
 import {
   InstancedPlaneMeshDesc,
   type PlaneChildConfig,
-} from "@navaramap/three_default_descs";
+} from "@navaramap/three-default-descs";
 import { Matrix4, Vector3 } from "three";
 import { enuOffset, type Geodetic } from "./geo";
 import { REFERENCE } from "./viewpoints";
@@ -55,10 +56,11 @@ export type PedestrianRoute = {
 type Feature = {
   type: "Feature";
   properties?: Record<string, unknown> | null;
-  geometry: {
-    type: "LineString" | "MultiLineString" | "Polygon" | "MultiPolygon";
-    coordinates: LngLat[] | LngLat[][] | LngLat[][][];
-  };
+  geometry:
+    | { type: "LineString"; coordinates: LngLat[] }
+    | { type: "MultiLineString"; coordinates: LngLat[][] }
+    | { type: "Polygon"; coordinates: LngLat[][] }
+    | { type: "MultiPolygon"; coordinates: LngLat[][][] };
 };
 
 export type RouteGeoJson = {
@@ -87,7 +89,6 @@ function fixOrder(c: LngLat): LngLat {
   return [a, b];
 }
 
-/** LineString / MultiLineString をまとめて点列の配列に開く。 */
 /**
  * 連続する同じ座標を取り除く。
  *
@@ -118,25 +119,34 @@ function dropDuplicates(points: LngLat[]): LngLat[] {
   return out;
 }
 
+/** LineString / MultiLineString をまとめて点列の配列に開く。 */
 function toPaths(f: Feature): LngLat[][] {
   const g = f.geometry;
   const raw =
-    g.type === "MultiLineString"
-      ? (g.coordinates as LngLat[][])
-      : [g.coordinates as LngLat[]];
+    g.type === "LineString"
+      ? [g.coordinates]
+      : g.type === "MultiLineString"
+        ? g.coordinates
+        : [];
   return raw
     .map((line) => dropDuplicates(line.map((c) => fixOrder([Number(c[0]), Number(c[1])]))))
     .filter((line) => line.length >= 2);
+}
+
+function isRouteGeoJson(json: unknown): json is RouteGeoJson {
+  if (typeof json !== "object" || json === null) return false;
+  if (!("type" in json) || !("features" in json)) return false;
+  return json.type === "FeatureCollection" && Array.isArray(json.features);
 }
 
 /** Polygon / MultiPolygon の外周リングを取り出す。 */
 function toRings(f: Feature): LngLat[][] {
   const g = f.geometry;
   const raw =
-    g.type === "MultiPolygon"
-      ? (g.coordinates as LngLat[][][]).map((p) => p[0]!)
-      : g.type === "Polygon"
-        ? [(g.coordinates as LngLat[][])[0]!]
+    g.type === "Polygon"
+      ? [g.coordinates[0]]
+      : g.type === "MultiPolygon"
+        ? g.coordinates.map((p) => p[0])
         : [];
   return raw
     .map((ring) => dropDuplicates(ring.map((c) => fixOrder([Number(c[0]), Number(c[1])]))))
@@ -148,10 +158,8 @@ async function loadGeoJson(url: string): Promise<RouteGeoJson | null> {
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = (await res.json()) as RouteGeoJson;
-    if (json?.type !== "FeatureCollection" || !Array.isArray(json.features)) {
-      throw new Error("FeatureCollection ではありません");
-    }
+    const json: unknown = await res.json();
+    if (!isRouteGeoJson(json)) throw new Error("FeatureCollection ではありません");
     return json;
   } catch (e) {
     console.warn(`[traffic] ${url} を読み込めませんでした:`, e);
@@ -285,7 +293,7 @@ export class PedestrianFlow {
   private groundAt: (lng: number, lat: number) => number = () => 0;
 
   constructor(opts: {
-    view: ThreeView<any>;
+    view: ThreeView<DefaultDescriptions>;
     frame: Matrix4;
     bloomId: string;
     /**

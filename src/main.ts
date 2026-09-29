@@ -1,18 +1,20 @@
 import ThreeView, {
   CameraDirection,
   Color,
-  degreeToRadian,
   geodeticSurfaceNormal,
 } from "@navaramap/three";
-import { DefaultDescriptions, DefaultPlugin } from "@navaramap/three_default_plugin";
+import { DefaultPlugin } from "@navaramap/three-default-plugin";
 import type {
   CloudsEffectDesc,
   RainMeshDesc,
   SelectiveBloomEffectDesc,
   SSREffectDesc,
   AmbientLightDesc,
-} from "@navaramap/three_default_descs";
+} from "@navaramap/three-default-descs";
 import { Matrix4, Vector3 } from "three";
+
+import type { AppDescriptions } from "./navara";
+import { registerSmoothBloom, type SmoothBloomEffectDesc } from "./smoothBloom";
 
 import {
   distanceMeters,
@@ -56,13 +58,30 @@ import { buildUi } from "./ui";
 
 const canvas = document.getElementById("map") as HTMLCanvasElement;
 
-const view = new ThreeView<DefaultDescriptions>({
+/**
+ * 描画設定の A/B 用クエリ。`?dpr=1&msaa=4` のように付けてリロードする。
+ * pixelRatio と multisampling は初期化専用で、後から変えられない。
+ * MSAA は G-buffer の全アタッチメントに乗るので、DPR 2 のまま 4x にすると
+ * VRAM が数百 MB 増える。試すときは dpr=1 と組み合わせる。
+ */
+const query = new URLSearchParams(location.search);
+const queryNumber = (key: string): number | undefined => {
+  const raw = query.get(key);
+  if (raw === null) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : undefined;
+};
+
+const view = new ThreeView<AppDescriptions>({
   canvas,
   // 花火は毎フレーム動くので常時描画にする。
   // false のままだと forceUpdate() を毎フレーム呼ぶ必要がある。
   animation: true,
   useNormal: true,
-  multisampling: 0,
+  // 既定はデバイスの DPR をそのまま使う（上限なし）。
+  // 3 以上の端末で描画面積が膨らみすぎないよう 2 で止める。
+  pixelRatio: queryNumber("dpr") ?? Math.min(window.devicePixelRatio, 2),
+  multisampling: queryNumber("msaa") ?? 0,
 });
 
 const defaultPlugin = new DefaultPlugin();
@@ -72,6 +91,9 @@ await view.init();
 
 // 空・星・太陽・大気・トーンマッピング・アンチエイリアスを一括で用意する
 defaultPlugin.addDefaultPhotorealScene();
+
+// アプリ内で試作しているカスタム効果
+registerSmoothBloom(view);
 
 // ---------------------------------------------------------------------------
 // 隅田川の中心線
@@ -113,21 +135,40 @@ const terrain = view.addSource({
 view.addLayer({ type: "terrain", source: terrain, terrain: {} });
 
 // 花火を光らせる主役。これがないと球体がただ並んでいるだけに見える。
-const bloom = view.addEffect<SelectiveBloomEffectDesc>({
-  selectiveBloom: {
-    strength: 1.0,
-    // 半径を大きくすると光が広く滲む。0.62 では東京の道路網が
-    // 一面の白いシートになってしまった。
-    radius: 0.32,
-    // 0 だと「発光しているもの全部」が滲み、街全体が白飛びする。
-    // 一方で上げすぎると、夜は光源がないため発光物が色パスでも真っ黒になり、
-    // 道路のような線は「滲まない＝完全に見えない」状態になる。
-    // 道路が細く光り、花火が大きく滲む境目を狙って 0.22 に置いている。
-    threshold: 0.22,
-    // 低いと滲みが四角いブロック状になる（アップサンプルの粗さが出る）
-    resolutionScale: 0.75,
-  },
-});
+//
+// 閾値は 0 だと「発光しているもの全部」が滲み、街全体が白飛びする。
+// 一方で上げすぎると、夜は光源がないため発光物が色パスでも真っ黒になり、
+// 道路のような線は「滲まない＝完全に見えない」状態になる。
+// 道路が細く光り、花火が大きく滲む境目を狙って 0.22 に置いている。
+const BLOOM_THRESHOLD = 0.22;
+
+// 既定はアプリ内で試作した smoothBloom（1 段ずつテントフィルタで拡大する方式）。
+// Navara 標準の selectiveBloom は 5 段のミップを単純バイリニアで引き伸ばして
+// 足すため、遠くまで滲ませると低解像度ミップの四角い形が残る。
+// `?bloom=unreal` で標準に切り替えて見比べられる。
+const bloom =
+  query.get("bloom") === "unreal"
+    ? view.addEffect<SelectiveBloomEffectDesc>({
+        selectiveBloom: {
+          strength: 1.0,
+          // 半径は bloom テクスチャの texel 基準。resolutionScale 1.0 に合わせた値。
+          radius: 0.4,
+          threshold: BLOOM_THRESHOLD,
+          // UnrealBloomPassRGBA はこの倍率の上でさらに半分から滲みを作る。
+          // 0.75 だと画面の 3/8 解像度になり四角いブロックが目立った。
+          resolutionScale: 1.0,
+        },
+      })
+    : view.addEffect<SmoothBloomEffectDesc>({
+        smoothBloom: {
+          strength: 1.0,
+          threshold: BLOOM_THRESHOLD,
+          smoothing: 0.1,
+          radius: 0.85,
+          levels: 8,
+          resolutionScale: 1.0,
+        },
+      });
 
 // PLATEAU 3D 都市モデル（建築物 LOD1）。台東区と墨田区が隅田川を挟んでいる。
 const PLATEAU_TILESETS = [
@@ -175,7 +216,7 @@ const nightAmbient = view.addLight<AmbientLightDesc>({
 
 const riverSource = view.addSource({
   type: "geojson",
-  data: riverSurface(river) as unknown as Record<string, unknown>,
+  data: riverSurface(river),
 });
 
 const riverLayer = view.addLayer({
@@ -296,7 +337,7 @@ const ssr = view.addEffect<SSREffectDesc>({
   ssr: {
     resolutionScale: 0.5,
     // ぼかしのカーネルは奇数。水面の反射を少しにじませる。
-    kernelSize: 3,
+    resolveKernelSize: 3,
     useConeTracing: true,
     coneTracingMaxDistance: 3000,
     // 画面端の反射は破綻しやすいので早めにフェードさせる
@@ -324,8 +365,8 @@ function groundHeight(lng: number, lat: number): number {
 /** 地形の高さを監視し、判明したらキャッシュして callback を呼ぶ。 */
 function watchGround(lng: number, lat: number, onResolved?: (h: number) => void) {
   const key = groundKey(lng, lat);
-  const pos = { lng: degreeToRadian(lng), lat: degreeToRadian(lat) };
-  const immediate = view.sampleTerrainHeight({ ...pos, height: 0 });
+  const pos = { lng, lat };
+  const immediate = view.sampleTerrainHeight(pos);
   if (immediate !== undefined) {
     groundCache.set(key, immediate);
     onResolved?.(immediate);
@@ -402,7 +443,7 @@ function readCameraEcef(): Vector3 {
 }
 
 /** 花火の煙。風で流れる。 */
-const smoke = new SmokeSystem({ view, frame, rng, bloomId: bloom.id });
+const smoke = new SmokeSystem({ view, frame, rng });
 
 /** 直近の開花の距離と、音が届くまでの秒数。UI に出す。 */
 let lastDelay = 0;
@@ -481,15 +522,13 @@ const reducedAreas = await loadAreas("data/regulation-area-reduced.geojson", "re
 const noEntryAreas = await loadAreas("data/no-entry.geojson", "no-entry");
 const pedestrianRoutes = await loadPedestrianRoutes();
 
-const asData = (o: unknown) => o as unknown as Record<string, unknown>;
-
 /**
  * 交通規制区域（PM6:00〜9:30）。
  * 公式図では塗りつぶさず境界線だけなので、リングを線に変換して描く。
  */
 const regulationSource = view.addSource({
   type: "geojson",
-  data: asData(areaOutlineGeoJson(regulationAreas)),
+  data: areaOutlineGeoJson(regulationAreas),
 });
 const regulationLayer = view.addLayer({
   type: "vector",
@@ -511,7 +550,7 @@ const regulationLayer = view.addLayer({
 /** 縮小規制区域（PM9:30〜10:00）。同じく境界線だけ。 */
 const reducedSource = view.addSource({
   type: "geojson",
-  data: asData(areaOutlineGeoJson(reducedAreas)),
+  data: areaOutlineGeoJson(reducedAreas),
 });
 const reducedLayer = view.addLayer({
   type: "vector",
@@ -553,7 +592,7 @@ const reducedLayer = view.addLayer({
  */
 const noEntryOutlineSource = view.addSource({
   type: "geojson",
-  data: asData(areaOutlineGeoJson(noEntryAreas)),
+  data: areaOutlineGeoJson(noEntryAreas),
 });
 const noEntryOutlineLayer = view.addLayer({
   type: "vector",
@@ -586,7 +625,7 @@ const noEntryOutlineLayer = view.addLayer({
 const noEntryData = riversideNoEntry(river);
 const noEntrySource = view.addSource({
   type: "geojson",
-  data: asData(noEntryData),
+  data: noEntryData,
 });
 const noEntryLayer = view.addLayer({
   type: "vector",
@@ -819,8 +858,8 @@ function applyExposure(_v?: number) {
 
 /** 基準点における地表法線（真上の向き）。太陽高度の計算に使う。 */
 const localUp = geodeticSurfaceNormal({
-  lng: degreeToRadian(REFERENCE.lng),
-  lat: degreeToRadian(REFERENCE.lat),
+  lng: REFERENCE.lng,
+  lat: REFERENCE.lat,
   height: 0,
 });
 
@@ -876,6 +915,7 @@ function applyNight(force = false) {
   const night = 1 - daylight;
 
   pedestrianFlow.setDaylight(daylight);
+  smoke.setDaylight(daylight);
   applyRoadGlow();
   applyExposure();
 
@@ -896,7 +936,7 @@ function applyNight(force = false) {
   const bldg = new Color().setStyle(DAY_BUILDING);
   bldg.raw.lerp(new Color().setStyle(NIGHT_BUILDING).raw, night);
   for (const layer of buildingLayers) {
-    layer.update({ type: "3d-tiles", model: { color: bldg } } as never);
+    layer.update({ type: "3d-tiles", model: { color: bldg } });
   }
 }
 
@@ -1087,7 +1127,7 @@ function setFreeCamera(on: boolean, animate = true) {
     // 両会場が入る高さまで引いて、見下ろす姿勢にする
     // 蔵前橋の上空から北北西を見下ろす。両会場が左右 ±27 度に収まる構図。
     const cam = { ...FREE_CAMERA_HOME };
-    if (animate) view.flyTo(cam, 1600, 2600);
+    if (animate) view.flyTo(cam, { duration: 1600, maxHeight: 2600 });
     else view.setCamera(cam);
   } else {
     gotoViewpoint(state.viewpoint);
@@ -1125,8 +1165,7 @@ canvas.addEventListener("dblclick", (e) => {
       pitch: o.pitch ?? 10,
       heading: o.heading ?? 0,
     },
-    1400,
-    Math.max(400, g.height + 500),
+    { duration: 1400, maxHeight: Math.max(400, g.height + 500) },
   );
 });
 
@@ -1207,7 +1246,7 @@ function gotoViewpoint(vp: Viewpoint, animate = true) {
       pitch: vp.pitch,
       heading,
     };
-    if (animate) view.flyTo(cam, 2400, 3000);
+    if (animate) view.flyTo(cam, { duration: 2400, maxHeight: 3000 });
     else view.setCamera(cam);
     return;
   }
@@ -1219,7 +1258,7 @@ function gotoViewpoint(vp: Viewpoint, animate = true) {
     pitch: vp.pitch,
     heading,
   };
-  if (animate) view.flyTo(cam, 2200, Math.max(1500, pos.height + 900));
+  if (animate) view.flyTo(cam, { duration: 2200, maxHeight: Math.max(1500, pos.height + 900) });
   else view.setCamera(cam);
 
   if (vp.freeLook) {
@@ -1487,7 +1526,27 @@ if (loading) {
 }
 
 // デバッグ用にコンソールから触れるようにしておく
-Object.assign(window as any, {
+declare global {
+  interface Window {
+    view: typeof view;
+    fireworks: typeof fireworks;
+    smoke: typeof smoke;
+    program: typeof program;
+    state: typeof state;
+    buildingLayers: typeof buildingLayers;
+    riverLayer: typeof riverLayer;
+    rain: typeof rain;
+    ssr: typeof ssr;
+    roadLayer: typeof roadLayer;
+    regulationLayer: typeof regulationLayer;
+    reducedLayer: typeof reducedLayer;
+    noEntryLayer: typeof noEntryLayer;
+    noEntryOutlineLayer: typeof noEntryOutlineLayer;
+    pedestrianFlow: typeof pedestrianFlow;
+    applyNight: typeof applyNight;
+  }
+}
+Object.assign(window, {
   view,
   fireworks,
   smoke,
