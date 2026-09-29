@@ -875,6 +875,11 @@ const localUp = geodeticSurfaceNormal({
 const NIGHT_ELEVATION = -12;
 /** 完全な昼として扱う太陽高度（度）。 */
 const DAY_ELEVATION = 3;
+/**
+ * 道路の点灯を昼夜判定より早める量（太陽高度、度）。約 25 分ぶん。
+ * 昼夜判定のままだと 19:20 頃まで発光値がブルームの閾値に届かず、道路が暗い。
+ */
+const STREETLIGHT_LEAD = 4.4;
 
 /**
  * 現在の「昼らしさ」0〜1 を太陽高度から求める。
@@ -882,15 +887,16 @@ const DAY_ELEVATION = 3;
  * 時刻から決め打ちするのではなく、Navara が計算した太陽の向きを使う。
  * 空そのものは Navara の大気散乱が物理的に描くので、
  * ここで決めるのは地表・建物・環境光・露出の明るさ。
+ * `lead`（度）を渡すと太陽高度をその分低く見て、早めに夜にする。
  */
-function currentDaylight(): number {
+function currentDaylight(lead = 0): number {
   const sun = view.atmosphere.sunDirection;
   const dot =
     (sun.x * localUp.x + sun.y * localUp.y + sun.z * localUp.z) /
     (Math.hypot(sun.x, sun.y, sun.z) || 1);
   const elevationDeg = (Math.asin(Math.max(-1, Math.min(1, dot))) * 180) / Math.PI;
   const t =
-    (elevationDeg - NIGHT_ELEVATION) / (DAY_ELEVATION - NIGHT_ELEVATION);
+    (elevationDeg - lead - NIGHT_ELEVATION) / (DAY_ELEVATION - NIGHT_ELEVATION);
   const c = Math.max(0, Math.min(1, t));
   // なめらかに（smoothstep）
   return c * c * (3 - 2 * c);
@@ -942,7 +948,7 @@ function applyNight(force = false) {
 
 /** 光る道路の表示と強さを反映する。夜だけ光らせる。 */
 function applyRoadGlow() {
-  const night = 1 - Math.max(0, Math.min(1, appliedDaylight || 0));
+  const night = 1 - currentDaylight(STREETLIGHT_LEAD);
   // 昼は消す。航空写真に道路が写っているので二重に描く意味がなく、
   // 半透明の線が煙や地表に重なって汚れて見える。
   const on = state.roadGlow && night > 0.06 && state.roadGlowStrength > 0.02;
