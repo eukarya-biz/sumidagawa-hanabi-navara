@@ -443,7 +443,7 @@ function readCameraEcef(): Vector3 {
 }
 
 /** 花火の煙。風で流れる。 */
-const smoke = new SmokeSystem({ view, frame, rng, bloomId: bloom.id });
+const smoke = new SmokeSystem({ view, frame, rng });
 
 /** 直近の開花の距離と、音が届くまでの秒数。UI に出す。 */
 let lastDelay = 0;
@@ -915,6 +915,7 @@ function applyNight(force = false) {
   const night = 1 - daylight;
 
   pedestrianFlow.setDaylight(daylight);
+  smoke.setDaylight(daylight);
   applyRoadGlow();
   applyExposure();
 
