@@ -84,7 +84,9 @@ TypeScript で行い、毎フレーム `handle.ref.replaceAll()` で
 
 ### 光らせ方
 
-`SelectiveBloomEffectDesc` が要です。これがないと発光する球体が並んでいるだけに見えます。
+選択的 Bloom が要です。これがないと発光する球体が並んでいるだけに見えます。
+既定はアプリ内で試作した `smoothBloom`（後述）で、`?bloom=unreal` を付けると
+Navara 標準の `SelectiveBloomEffectDesc` に切り替えて見比べられます。
 
 **閾値（`threshold`）の調整でいちばん往復しました。**
 
@@ -101,8 +103,23 @@ TypeScript で行い、毎フレーム `handle.ref.replaceAll()` で
 花火（発光 2.2〜3.2）が大きく滲む境目です。
 あわせて夜の環境光を 0.85 まで上げ、ブルームに入らないものも
 輪郭が見えるようにしています。
-`radius` も 0.62 では光が広がりすぎたので 0.32 に、
-`resolutionScale` は 0.5 だと滲みが四角いブロック状に見えたので 0.75 にしています。
+**滲みの形**は Navara 0.1.1 標準の `SelectiveBloomEffectDesc` では解決できませんでした。
+内部の `UnrealBloomPassRGBA` が 5 段のミップをそれぞれ単純バイリニアで
+引き伸ばして足すため、最も低い 1/32 解像度のミップの四角いピラミッド形が、
+遠くまで滲ませたときに残ります。`resolutionScale` を 0.75 から 1.0 に上げると
+ブロックは細かくなりますが消えません。`radius` を上げると低解像度ミップの
+重みが増えるので、むしろ四角さが強まります。
+
+そこで `src/smoothBloom.ts` に、抽出と合成は標準と同じにして、ブラーだけを
+postprocessing の `MipmapBlurPass`（13 タップでダウンサンプルし、9 タップの
+テントフィルタで 1 段ずつアップサンプルする方式）に差し替えたカスタム効果を
+作り、`view.registerEffect` で登録して使っています。1 段ずつ拡大するので
+四角い形が出ず、滲みが丸くまとまります。
+
+この方式は Navara 本体にも取り込まれました（maplibre/navara #832、2026-09-24 マージ）。
+次のリリースからは標準の `SelectiveBloomEffectDesc` が同じ `MipmapBlurPass` 方式になり、
+`smoothing` と `levels` の設定も増えます。リリース後は `smoothBloom.ts` を外して
+標準に戻す予定で、それまでのつなぎとして残しています。
 
 発光値は「ブルームの閾値を超えるか」で意味が変わるため、
 要素ごとに意図して振り分けています。
@@ -492,6 +509,8 @@ ECEF を直接扱う必要がなくなります。
 ```
 src/
 ├── main.ts        シーン構成・レイヤー・視点・メインループ
+├── smoothBloom.ts 滲みが丸くなる選択的 Bloom（Navara #832 と同方式。リリースまでのつなぎ）
+├── navara.ts      アプリで使う記述子の型（標準 + カスタム効果）
 ├── fireworks.ts   花火の物理シミュレーションと描画（中核）
 ├── program.ts     番組構成（オープニング〜フィナーレ）
 ├── audio.ts       距離に応じて遅延する音の合成

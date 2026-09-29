@@ -3,7 +3,7 @@ import ThreeView, {
   Color,
   geodeticSurfaceNormal,
 } from "@navaramap/three";
-import { DefaultDescriptions, DefaultPlugin } from "@navaramap/three-default-plugin";
+import { DefaultPlugin } from "@navaramap/three-default-plugin";
 import type {
   CloudsEffectDesc,
   RainMeshDesc,
@@ -12,6 +12,9 @@ import type {
   AmbientLightDesc,
 } from "@navaramap/three-default-descs";
 import { Matrix4, Vector3 } from "three";
+
+import type { AppDescriptions } from "./navara";
+import { registerSmoothBloom, type SmoothBloomEffectDesc } from "./smoothBloom";
 
 import {
   distanceMeters,
@@ -69,7 +72,7 @@ const queryNumber = (key: string): number | undefined => {
   return Number.isFinite(n) ? n : undefined;
 };
 
-const view = new ThreeView<DefaultDescriptions>({
+const view = new ThreeView<AppDescriptions>({
   canvas,
   // 花火は毎フレーム動くので常時描画にする。
   // false のままだと forceUpdate() を毎フレーム呼ぶ必要がある。
@@ -88,6 +91,9 @@ await view.init();
 
 // 空・星・太陽・大気・トーンマッピング・アンチエイリアスを一括で用意する
 defaultPlugin.addDefaultPhotorealScene();
+
+// アプリ内で試作しているカスタム効果
+registerSmoothBloom(view);
 
 // ---------------------------------------------------------------------------
 // 隅田川の中心線
@@ -129,21 +135,40 @@ const terrain = view.addSource({
 view.addLayer({ type: "terrain", source: terrain, terrain: {} });
 
 // 花火を光らせる主役。これがないと球体がただ並んでいるだけに見える。
-const bloom = view.addEffect<SelectiveBloomEffectDesc>({
-  selectiveBloom: {
-    strength: 1.0,
-    // 半径を大きくすると光が広く滲む。0.62 では東京の道路網が
-    // 一面の白いシートになってしまった。
-    radius: 0.32,
-    // 0 だと「発光しているもの全部」が滲み、街全体が白飛びする。
-    // 一方で上げすぎると、夜は光源がないため発光物が色パスでも真っ黒になり、
-    // 道路のような線は「滲まない＝完全に見えない」状態になる。
-    // 道路が細く光り、花火が大きく滲む境目を狙って 0.22 に置いている。
-    threshold: 0.22,
-    // 低いと滲みが四角いブロック状になる（アップサンプルの粗さが出る）
-    resolutionScale: 0.75,
-  },
-});
+//
+// 閾値は 0 だと「発光しているもの全部」が滲み、街全体が白飛びする。
+// 一方で上げすぎると、夜は光源がないため発光物が色パスでも真っ黒になり、
+// 道路のような線は「滲まない＝完全に見えない」状態になる。
+// 道路が細く光り、花火が大きく滲む境目を狙って 0.22 に置いている。
+const BLOOM_THRESHOLD = 0.22;
+
+// 既定はアプリ内で試作した smoothBloom（1 段ずつテントフィルタで拡大する方式）。
+// Navara 標準の selectiveBloom は 5 段のミップを単純バイリニアで引き伸ばして
+// 足すため、遠くまで滲ませると低解像度ミップの四角い形が残る。
+// `?bloom=unreal` で標準に切り替えて見比べられる。
+const bloom =
+  query.get("bloom") === "unreal"
+    ? view.addEffect<SelectiveBloomEffectDesc>({
+        selectiveBloom: {
+          strength: 1.0,
+          // 半径は bloom テクスチャの texel 基準。resolutionScale 1.0 に合わせた値。
+          radius: 0.4,
+          threshold: BLOOM_THRESHOLD,
+          // UnrealBloomPassRGBA はこの倍率の上でさらに半分から滲みを作る。
+          // 0.75 だと画面の 3/8 解像度になり四角いブロックが目立った。
+          resolutionScale: 1.0,
+        },
+      })
+    : view.addEffect<SmoothBloomEffectDesc>({
+        smoothBloom: {
+          strength: 1.0,
+          threshold: BLOOM_THRESHOLD,
+          smoothing: 0.1,
+          radius: 0.85,
+          levels: 8,
+          resolutionScale: 1.0,
+        },
+      });
 
 // PLATEAU 3D 都市モデル（建築物 LOD1）。台東区と墨田区が隅田川を挟んでいる。
 const PLATEAU_TILESETS = [
