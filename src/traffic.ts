@@ -1,16 +1,19 @@
 /**
- * 交通規制と歩行者動線。
+ * 交通規制・立入禁止区域・歩行者動線。
  *
  * データは TypeScript ではなく **GeoJSON ファイル**で持っています。
  *
- *   public/data/traffic-regulation.geojson   交通規制区間
- *   public/data/pedestrian-flow.geojson      歩行者の進行方向
+ *   public/data/regulation-area.geojson          交通規制区域（PM6:00〜9:30）
+ *   public/data/regulation-area-reduced.geojson  縮小規制区域（PM9:30〜10:00）
+ *   public/data/no-entry.geojson                 立入禁止区域
+ *   public/data/pedestrian-flow.geojson          歩行者の進行方向
  *
- * この 2 つを差し替えれば表示が変わります。コードを触る必要はありません。
- * 仕様は README の「交通規制と歩行者動線」を参照してください。
+ * これらを差し替えれば表示が変わります。コードを触る必要はありません。
  *
- * ⚠️ 同梱しているのは概略値です。公式の道路規制図は文字情報を持たない
- * 画像 PDF のため機械的に読み取れませんでした。実際の通行判断には使えません。
+ * ⚠️ 同梱データは公式の「道路規制図」（令和8年 第49回）を読み取って
+ * 起こしたものですが、元図が模式図のため位置は概略です。
+ * 橋と駅は国土地理院の実測座標に寄せていますが、区域境界は ±150 m 程度の
+ * 誤差があります。実際の通行判断には使えません。
  */
 
 import ThreeView, { Color, type MeshHandle } from "@navaramap/three";
@@ -26,12 +29,15 @@ import { REFERENCE } from "./viewpoints";
 /** 経度・緯度の組。 */
 type LngLat = [number, number];
 
-/** 交通規制の区間。 */
-export type RegulationRoute = {
+/** 区域（交通規制区域・縮小規制区域・立入禁止区域）。 */
+export type RegulationArea = {
   name: string;
-  /** 規制の種類。色分けに使う。 */
-  kind: "vehicle" | "bridge";
-  path: LngLat[];
+  /** 表示上の種別。 */
+  kind: "regulation" | "reduced" | "no-entry";
+  /** 規制時間帯（図に書かれているもの）。 */
+  time?: string;
+  /** 外周のリング。 */
+  ring: LngLat[];
 };
 
 /** 歩行者の進行方向（一方通行の動線）。 */
@@ -52,12 +58,24 @@ type Feature = {
   properties?: Record<string, unknown> | null;
   geometry:
     | { type: "LineString"; coordinates: LngLat[] }
-    | { type: "MultiLineString"; coordinates: LngLat[][] };
+    | { type: "MultiLineString"; coordinates: LngLat[][] }
+    | { type: "Polygon"; coordinates: LngLat[][] }
+    | { type: "MultiPolygon"; coordinates: LngLat[][][] };
 };
 
 export type RouteGeoJson = {
   type: "FeatureCollection";
   features: Feature[];
+};
+
+/** レイヤーに渡す GeoJSON（Navara 側は構造しか見ない）。 */
+type OutGeoJson = {
+  type: "FeatureCollection";
+  features: {
+    type: "Feature";
+    properties: Record<string, unknown>;
+    geometry: { type: string; coordinates: unknown };
+  }[];
 };
 
 /**
@@ -71,12 +89,47 @@ function fixOrder(c: LngLat): LngLat {
   return [a, b];
 }
 
+/**
+ * 連続する同じ座標を取り除く。
+ *
+ * QGIS で頂点を打つときにダブルクリックが入ると、まったく同じ点が
+ * 2 つ並んだまま保存される。目で見ても形は変わらないので気づきにくい。
+ *
+ * ところが線として描くと、同じ点が 2 つ並んだ区間は長さがゼロになり、
+ * 線の向き（法線）が計算できず NaN になる。
+ * Navara は複数の地物を 1 つのメッシュにまとめて描くため、
+ * 1 本でも NaN が混じるとバウンディングスフィアが NaN になり、
+ * 「画面の外にある」と判定されて **そのレイヤーが丸ごと消える**。
+ *
+ * 読み込み直後は見えているのに、少し経つと消えるという症状が出る。
+ * 実際に立入禁止区域で発生した（規制区域は重複がなかったので無事だった）。
+ *
+ * 許容誤差は緯度経度で 1e-9 度。地上では 0.1 mm 未満なので、
+ * 意図して置いた頂点を消してしまう心配はない。
+ */
+function dropDuplicates(points: LngLat[]): LngLat[] {
+  const out: LngLat[] = [];
+  for (const p of points) {
+    const prev = out[out.length - 1];
+    if (prev && Math.abs(prev[0] - p[0]) < 1e-9 && Math.abs(prev[1] - p[1]) < 1e-9) {
+      continue;
+    }
+    out.push(p);
+  }
+  return out;
+}
+
 /** LineString / MultiLineString をまとめて点列の配列に開く。 */
 function toPaths(f: Feature): LngLat[][] {
   const g = f.geometry;
-  const raw = g.type === "MultiLineString" ? g.coordinates : [g.coordinates];
+  const raw =
+    g.type === "LineString"
+      ? [g.coordinates]
+      : g.type === "MultiLineString"
+        ? g.coordinates
+        : [];
   return raw
-    .map((line) => line.map((c) => fixOrder([Number(c[0]), Number(c[1])])))
+    .map((line) => dropDuplicates(line.map((c) => fixOrder([Number(c[0]), Number(c[1])]))))
     .filter((line) => line.length >= 2);
 }
 
@@ -84,6 +137,20 @@ function isRouteGeoJson(json: unknown): json is RouteGeoJson {
   if (typeof json !== "object" || json === null) return false;
   if (!("type" in json) || !("features" in json)) return false;
   return json.type === "FeatureCollection" && Array.isArray(json.features);
+}
+
+/** Polygon / MultiPolygon の外周リングを取り出す。 */
+function toRings(f: Feature): LngLat[][] {
+  const g = f.geometry;
+  const raw =
+    g.type === "Polygon"
+      ? [g.coordinates[0]]
+      : g.type === "MultiPolygon"
+        ? g.coordinates.map((p) => p[0])
+        : [];
+  return raw
+    .map((ring) => dropDuplicates(ring.map((c) => fixOrder([Number(c[0]), Number(c[1])]))))
+    .filter((ring) => ring.length >= 4);
 }
 
 /** GeoJSON を取得する。失敗しても作品全体は動き続ける。 */
@@ -100,18 +167,23 @@ async function loadGeoJson(url: string): Promise<RouteGeoJson | null> {
   }
 }
 
-/** 交通規制区間を読み込む。 */
-export async function loadRegulationRoutes(
-  url = "data/traffic-regulation.geojson",
-): Promise<RegulationRoute[]> {
+/**
+ * 区域の GeoJSON を読み込む。
+ * @param kind この区域の種別（ファイルごとに固定）
+ */
+export async function loadAreas(
+  url: string,
+  kind: RegulationArea["kind"],
+): Promise<RegulationArea[]> {
   const json = await loadGeoJson(url);
   if (!json) return [];
-  const out: RegulationRoute[] = [];
+  const out: RegulationArea[] = [];
   for (const f of json.features) {
     const name = String(f.properties?.["name"] ?? "");
-    const kindRaw = String(f.properties?.["kind"] ?? "vehicle");
-    const kind: RegulationRoute["kind"] = kindRaw === "bridge" ? "bridge" : "vehicle";
-    for (const path of toPaths(f)) out.push({ name, kind, path });
+    const time = f.properties?.["time"];
+    for (const ring of toRings(f)) {
+      out.push({ name, kind, ring, time: typeof time === "string" ? time : undefined });
+    }
   }
   return out;
 }
@@ -141,13 +213,30 @@ export async function loadPedestrianRoutes(
 // GeoJSON への変換（レイヤーに渡す用）
 // ---------------------------------------------------------------------------
 
-export function regulationGeoJson(routes: RegulationRoute[]): RouteGeoJson {
+/** 区域をそのまま面として描くための GeoJSON。 */
+export function areaPolygonGeoJson(areas: RegulationArea[]): OutGeoJson {
   return {
     type: "FeatureCollection",
-    features: routes.map((r) => ({
+    features: areas.map((a) => ({
       type: "Feature",
-      properties: { name: r.name, kind: r.kind },
-      geometry: { type: "LineString", coordinates: r.path },
+      properties: { name: a.name, kind: a.kind },
+      geometry: { type: "Polygon", coordinates: [a.ring] },
+    })),
+  };
+}
+
+/**
+ * 区域の**外周線**だけを描くための GeoJSON。
+ * 公式図では交通規制区域と縮小規制区域は塗りつぶさず境界線だけなので、
+ * リングを LineString に変換して線として描く。
+ */
+export function areaOutlineGeoJson(areas: RegulationArea[]): OutGeoJson {
+  return {
+    type: "FeatureCollection",
+    features: areas.map((a) => ({
+      type: "Feature",
+      properties: { name: a.name, kind: a.kind },
+      geometry: { type: "LineString", coordinates: a.ring },
     })),
   };
 }
@@ -185,22 +274,38 @@ export class PedestrianFlow {
   private _daylight = 0;
 
   /** 矢印の間隔 (m)。 */
-  private static SPACING = 26;
-  /** 矢印の流れる速さ (m/s)。歩く速さより少し速くして流れを分かりやすくする。 */
-  private static SPEED = 9;
+  private static SPACING = 42;
+  /**
+   * 矢印の流れる速さ (m/s)。
+   *
+   * 実際の歩行速度（1.2 m/s 前後）ではなく、方向が一目で読める速さにしている。
+   * 間隔を広げると矢印どうしの間が空くぶん流れが途切れて見えるので、
+   * 速さも上げて「流れている」印象を保つ。
+   */
+  private static SPEED = 15;
   /** 矢印の長さ・幅 (m)。 */
   private static DASH_LENGTH = 11;
   private static DASH_WIDTH = 3.4;
+  /** 地面から浮かせる量 (m)。地面と同じ高さだと描画が競合する。 */
+  private static LIFT = 1.5;
+
+  private routes: PedestrianRoute[] = [];
+  private groundAt: (lng: number, lat: number) => number = () => 0;
 
   constructor(opts: {
     view: ThreeView<DefaultDescriptions>;
     frame: Matrix4;
     bloomId: string;
-    /** 道路面の楕円体高。 */
-    groundHeight: number;
+    /**
+     * その地点の地面の楕円体高を返す関数。
+     * 地形は非同期に読み込まれるので、判明したら `rebuild()` を呼ぶ。
+     */
+    groundAt: (lng: number, lat: number) => number;
     routes: PedestrianRoute[];
   }) {
-    this.build(opts.routes, opts.groundHeight);
+    this.routes = opts.routes;
+    this.groundAt = opts.groundAt;
+    this.build(opts.routes, opts.groundAt);
 
     this.handle = opts.view.addMesh<InstancedPlaneMeshDesc>({
       planes: {
@@ -218,10 +323,22 @@ export class PedestrianFlow {
   }
 
   /** 経緯度の点列を ENU ローカルに直し、累積距離を計算しておく。 */
-  private build(routes: PedestrianRoute[], ground: number) {
+  /**
+   * 経緯度の点列を ENU ローカルに直す。
+   *
+   * 高さは**地点ごとに**地形から取る。
+   * 以前は REFERENCE 1 地点の標高を全部に使い回していたため、
+   * 地面が上がっていく台東区側（浅草 → 上野台地）で矢印が地中に埋まり、
+   * 隅田川の西側だけ動線がほとんど見えないという症状が出た。
+   * 墨田区側は平坦な低地なので影響が出ていなかった。
+   *
+   * `lift` は地面からの浮かせ量。0 だと地面と同じ高さで描画が競合するので、
+   * わずかに浮かせる。
+   */
+  private build(routes: PedestrianRoute[], groundAt: (lng: number, lat: number) => number) {
     for (const r of routes) {
       const pts = r.path.map(([lng, lat]) => {
-        const g: Geodetic = { lng, lat, height: ground };
+        const g: Geodetic = { lng, lat, height: groundAt(lng, lat) + PedestrianFlow.LIFT };
         return enuOffset(REFERENCE, g);
       });
       const acc: number[] = [0];
@@ -259,6 +376,15 @@ export class PedestrianFlow {
       // ENU の +X が東、+Y が北。平面の長辺（X 軸）を進行方向に向ける。
       heading: Math.atan2(b.y - a.y, b.x - a.x),
     };
+  }
+
+  /**
+   * 地形の高さが判明したあとに呼び、動線を作り直す。
+   * 地形は非同期に読み込まれるので、最初の build では近似値が使われている。
+   */
+  rebuild() {
+    this.lines = [];
+    this.build(this.routes, this.groundAt);
   }
 
   get visible(): boolean {

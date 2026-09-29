@@ -17,6 +17,7 @@ type UiOptions = {
     roadGlow: boolean;
     roadGlowStrength: number;
     showRegulation: boolean;
+    showNoEntry: boolean;
     showPedestrian: boolean;
     reflection: number;
     waterRoughness: number;
@@ -32,6 +33,7 @@ type UiOptions = {
   onRoadGlow: (on: boolean) => void;
   onRoadGlowStrength: (v: number) => void;
   onRegulation: (on: boolean) => void;
+  onNoEntry: (on: boolean) => void;
   onPedestrian: (on: boolean) => void;
   onReflection: (v: number) => void;
   onWaterRoughness: (v: number) => void;
@@ -450,9 +452,15 @@ export function buildUi(opts: UiOptions) {
   trafficSection.append(
     checkbox({
       label: "交通規制区域",
-      note: "赤＝車両通行止め、黄＝歩行者規制のかかる橋",
+      note: "青＝PM6:00〜9:30ごろ、緑＝縮小後 PM9:30〜10:00ごろ",
       checked: opts.initial.showRegulation,
       onChange: opts.onRegulation,
+    }),
+    checkbox({
+      label: "立入禁止区域",
+      note: "川の両岸の親水テラス・隅田公園など",
+      checked: opts.initial.showNoEntry,
+      onChange: opts.onNoEntry,
     }),
     checkbox({
       label: "歩行者の進行方向",
@@ -464,7 +472,7 @@ export function buildUi(opts: UiOptions) {
   const trafficWarn = document.createElement("p");
   trafficWarn.className = "hint warn";
   trafficWarn.innerHTML =
-    "⚠️ ここに表示している規制区間と動線は<b>イメージ</b>です。実際の通行判断には使えません。";
+    "⚠️ 公式の「道路規制図」を読み取って作成していますが、元図が模式図のため位置は<b>概略</b>です。実際の通行判断には使えません。";
   trafficSection.append(trafficWarn);
 
   const waterSection = document.createElement("section");
