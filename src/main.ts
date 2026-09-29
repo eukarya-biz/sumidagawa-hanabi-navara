@@ -55,13 +55,30 @@ import { buildUi } from "./ui";
 
 const canvas = document.getElementById("map") as HTMLCanvasElement;
 
+/**
+ * 描画設定の A/B 用クエリ。`?dpr=1&msaa=4` のように付けてリロードする。
+ * pixelRatio と multisampling は初期化専用で、後から変えられない。
+ * MSAA は G-buffer の全アタッチメントに乗るので、DPR 2 のまま 4x にすると
+ * VRAM が数百 MB 増える。試すときは dpr=1 と組み合わせる。
+ */
+const query = new URLSearchParams(location.search);
+const queryNumber = (key: string): number | undefined => {
+  const raw = query.get(key);
+  if (raw === null) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : undefined;
+};
+
 const view = new ThreeView<DefaultDescriptions>({
   canvas,
   // 花火は毎フレーム動くので常時描画にする。
   // false のままだと forceUpdate() を毎フレーム呼ぶ必要がある。
   animation: true,
   useNormal: true,
-  multisampling: 0,
+  // 既定はデバイスの DPR をそのまま使う（上限なし）。
+  // 3 以上の端末で描画面積が膨らみすぎないよう 2 で止める。
+  pixelRatio: queryNumber("dpr") ?? Math.min(window.devicePixelRatio, 2),
+  multisampling: queryNumber("msaa") ?? 0,
 });
 
 const defaultPlugin = new DefaultPlugin();
