@@ -9,13 +9,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@navaramap/three": "0.1.1",
-    "@navaramap/three-default-plugin": "0.1.1",
-    "@navaramap/three-default-descs": "0.1.1",
-    "@navaramap/three-plugins": "0.1.1",
+    "@navaramap/three": "0.2.1",
+    "@navaramap/three-default-descs": "0.2.1",
+    "@navaramap/three-default-plugin": "0.2.1",
+    "@navaramap/three-plugins": "0.2.1",
+    "postprocessing": "6.38.3",
     "three": "0.184.0",
-    "three-stdlib": "2.36.1",
-    "postprocessing": "6.38.3"
+    "three-stdlib": "2.36.1"
   },
   "devDependencies": {
     "@types/three": "0.184.0",
